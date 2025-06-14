@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: ai-content-agent-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - HOST=0.0.0.0
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - ../backend/.env
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+    networks:
+      - ai-content-net
+    restart: unless-stopped
+    command: npm run dev
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: ai-content-agent-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:3001/api/v1
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    networks:
+      - ai-content-net
+    restart: unless-stopped
+    command: npm run dev
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: ai-content-agent-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai-content-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Nginx reverse proxy (optional for production)
+  nginx:
+    image: nginx:alpine
+    container_name: ai-content-agent-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - ai-content-net
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  ai-content-net:
+    driver: bridge 
