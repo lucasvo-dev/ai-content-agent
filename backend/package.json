@@ -4,9 +4,9 @@
   "description": "AI Content Agent Backend - Automated blog writing and publishing system",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch --clear-screen=false src/start.ts",
+    "dev": "tsx watch --clear-screen=false src/dev-server.ts",
     "build": "tsc && tsc-alias",
-    "start": "node dist/start.js",
+    "start": "node dist/server.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src --ext .ts",
