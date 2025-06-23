@@ -5,6 +5,7 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { HybridAIService } from './services/HybridAIService.js';
+import { LinkContentController } from './controllers/LinkContentController.js';
 import type { ContentGenerationRequest } from './types/content.js';
 
 const app = express();
@@ -18,8 +19,9 @@ app.use(cors({
 
 app.use(express.json());
 
-// Initialize AI Service
+// Initialize services
 const aiService = new HybridAIService();
+const linkContentController = new LinkContentController();
 
 // Health check endpoint
 app.get('/api/v1/health', (req, res) => {
@@ -181,6 +183,43 @@ app.get('/api/v1/ai/stats', async (req, res) => {
       }
     });
   }
+});
+
+// Link-based content endpoints
+app.post('/api/v1/link-content/batch', linkContentController.createBatchJob);
+app.get('/api/v1/link-content/batch/:jobId', linkContentController.getBatchJobStatus);
+app.post('/api/v1/link-content/batch/:jobId/crawl', linkContentController.startCrawling);
+app.post('/api/v1/link-content/batch/:jobId/generate', linkContentController.generateContent);
+app.post('/api/v1/link-content/batch/:jobId/items/:itemId/approve', linkContentController.approveContentItem);
+app.post('/api/v1/link-content/batch/:jobId/items/:itemId/regenerate', linkContentController.regenerateContent);
+app.get('/api/v1/link-content/batch/:jobId/approved', linkContentController.getApprovedContent);
+app.post('/api/v1/link-content/test-scrape', linkContentController.testScrape);
+app.get('/api/v1/link-content/health', linkContentController.healthCheck);
+
+// WordPress sites endpoints - Mock data for development
+app.get('/api/v1/wordpress-sites/available-for-publishing', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      sites: [
+        {
+          id: 'site_1',
+          name: 'My WordPress Blog',
+          url: 'https://myblog.com',
+          isActive: true,
+          lastTested: new Date().toISOString()
+        },
+        {
+          id: 'site_2',
+          name: 'Tech News Site',
+          url: 'https://technews.example.com',
+          isActive: true,
+          lastTested: new Date().toISOString()
+        }
+      ]
+    },
+    message: 'Mock WordPress sites for development'
+  });
 });
 
 // Start server

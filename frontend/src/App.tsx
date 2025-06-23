@@ -4,7 +4,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'react-hot-toast';
 
 import ContentGenerator from './components/ContentGenerator';
-import { AITestPanel } from './components/AITestPanel';
+import { LinkContentWorkflow } from './components/LinkContentWorkflow';
 import './App.css';
 
 // Create a client
@@ -18,7 +18,7 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  const [currentView, setCurrentView] = useState<'generator' | 'test'>('test');
+  const [currentView, setCurrentView] = useState<'workflow' | 'generator'>('workflow');
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -32,21 +32,21 @@ function App() {
                   AI Content Agent
                 </h1>
                 <span className="ml-2 px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
-                  v1.0.0
+                  v2.0.0
                 </span>
               </div>
               <div className="flex items-center space-x-4">
                 {/* Navigation */}
                 <nav className="flex space-x-4">
                   <button
-                    onClick={() => setCurrentView('test')}
+                    onClick={() => setCurrentView('workflow')}
                     className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                      currentView === 'test'
+                      currentView === 'workflow'
                         ? 'bg-blue-100 text-blue-700'
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    System Test
+                    🔗 Link Content Workflow
                   </button>
                   <button
                     onClick={() => setCurrentView('generator')}
@@ -56,7 +56,7 @@ function App() {
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    Content Generator
+                    ✨ AI Content Generator
                   </button>
                 </nav>
                 <div className="flex items-center text-sm text-gray-500">
@@ -70,7 +70,7 @@ function App() {
 
         {/* Main Content */}
         <main className="py-8">
-          {currentView === 'test' ? <AITestPanel /> : <ContentGenerator />}
+          {currentView === 'workflow' ? <LinkContentWorkflow /> : <ContentGenerator />}
         </main>
 
         {/* Footer */}
@@ -78,10 +78,10 @@ function App() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="text-center text-sm text-gray-500">
               <p>
-                AI Content Agent - Automated content generation and publishing
+                AI Content Agent - Link-based content generation and publishing workflow
               </p>
               <p className="mt-1">
-                Powered by OpenAI GPT-4 Turbo
+                Powered by Hybrid AI: OpenAI GPT-4 Turbo + Google Gemini Flash
               </p>
             </div>
           </div>

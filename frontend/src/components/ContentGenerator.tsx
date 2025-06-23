@@ -5,8 +5,8 @@ import { z } from 'zod';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
-import Button from './ui/Button';
-import Card, { CardHeader, CardTitle, CardContent } from './ui/Card';
+import { Button } from './ui/Button';
+import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
 import { aiApi } from '../services/api';
 import type { ContentGenerationRequest, GeneratedContent } from '../types/api';
 

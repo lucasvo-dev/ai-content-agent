@@ -449,6 +449,336 @@ CREATE TABLE analytics (
 - Regular security audits
 - Legal consultation
 
+## Multi-Site Management Architecture
+
+### Mục tiêu hệ thống
+
+Xây dựng hệ thống quản lý đa trang web và đa nền tảng với khả năng:
+
+1. **Multi-WordPress Sites Management**: Quản lý nhiều site WordPress
+2. **Multi-Facebook Pages Management**: Quản lý nhiều Facebook pages
+3. **Site-Specific AI Training**: Fine-tuning AI cho từng site riêng biệt
+4. **Automated Content Pipeline**: Tự động tạo content phù hợp với từng site
+5. **Performance Analytics per Site**: Theo dõi hiệu suất từng site/page
+
+### Database Schema Mở Rộng
+
+```sql
+-- Sites Management (WordPress)
+CREATE TABLE wordpress_sites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  site_url VARCHAR(500) NOT NULL,
+  username VARCHAR(255) NOT NULL,
+  application_password TEXT NOT NULL, -- encrypted
+  status VARCHAR(50) DEFAULT 'active', -- active, inactive, error
+  settings JSONB DEFAULT '{}',
+  last_sync TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Facebook Pages Management
+CREATE TABLE facebook_pages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  page_id VARCHAR(255) NOT NULL,
+  access_token TEXT NOT NULL, -- encrypted
+  status VARCHAR(50) DEFAULT 'active',
+  settings JSONB DEFAULT '{}',
+  last_sync TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Site-Specific AI Training Data
+CREATE TABLE site_training_data (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id UUID, -- Can reference wordpress_sites OR facebook_pages
+  site_type VARCHAR(50) NOT NULL, -- 'wordpress' or 'facebook'
+  approved_content_id UUID REFERENCES content(id),
+  performance_metrics JSONB, -- engagement, clicks, conversions
+  user_feedback INTEGER CHECK (user_feedback BETWEEN 1 AND 10),
+  training_status VARCHAR(50) DEFAULT 'pending', -- pending, processed, used
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Site-Specific AI Models
+CREATE TABLE site_ai_models (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id UUID NOT NULL,
+  site_type VARCHAR(50) NOT NULL,
+  model_version VARCHAR(100) NOT NULL,
+  training_data_count INTEGER DEFAULT 0,
+  performance_score NUMERIC(5,2),
+  is_active BOOLEAN DEFAULT false,
+  model_config JSONB DEFAULT '{}',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Content Generation Jobs (Site-Specific)
+CREATE TABLE automated_content_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id UUID NOT NULL,
+  site_type VARCHAR(50) NOT NULL,
+  content_type VARCHAR(50) NOT NULL,
+  generation_frequency VARCHAR(50), -- daily, weekly, monthly
+  next_run_at TIMESTAMP,
+  last_run_at TIMESTAMP,
+  job_config JSONB DEFAULT '{}',
+  status VARCHAR(50) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Site Management API
+
+```typescript
+// WordPress Sites Management
+POST /api/v1/sites/wordpress
+{
+  "name": "My Marketing Blog",
+  "siteUrl": "https://myblog.com",
+  "username": "admin",
+  "applicationPassword": "xxxx xxxx xxxx xxxx",
+  "settings": {
+    "defaultCategory": "Marketing",
+    "defaultStatus": "draft",
+    "autoPublish": false,
+    "contentTypes": ["blog_post"],
+    "targetAudience": "Marketing professionals",
+    "brandVoice": {
+      "tone": "professional",
+      "style": "conversational"
+    }
+  }
+}
+
+// Facebook Pages Management
+POST /api/v1/sites/facebook
+{
+  "name": "Company Facebook Page",
+  "pageId": "123456789",
+  "accessToken": "EAABwzLixnjY...",
+  "settings": {
+    "autoPublish": true,
+    "contentTypes": ["social_media"],
+    "targetAudience": "Tech enthusiasts",
+    "postingSchedule": {
+      "frequency": "daily",
+      "times": ["09:00", "15:00", "18:00"]
+    }
+  }
+}
+
+// Get all sites for a project
+GET /api/v1/sites?projectId={projectId}
+
+// Site-specific content generation
+POST /api/v1/sites/{siteId}/generate-content
+{
+  "useSiteModel": true, // Use site-specific fine-tuned model
+  "contentType": "blog_post",
+  "topic": "AI Marketing Trends 2024",
+  "sourceUrls": ["https://example.com/article"]
+}
+```
+
+### Site-Specific AI Training System
+
+```typescript
+// services/SiteAITrainingService.ts
+export class SiteAITrainingService {
+  async collectTrainingData(
+    siteId: string,
+    siteType: "wordpress" | "facebook"
+  ) {
+    // 1. Collect approved content for this site
+    const approvedContent = await this.getApprovedContent(siteId, siteType);
+
+    // 2. Collect performance metrics
+    const performanceData = await this.getPerformanceMetrics(siteId, siteType);
+
+    // 3. Analyze successful patterns
+    const patterns = await this.analyzeSuccessPatterns(
+      approvedContent,
+      performanceData
+    );
+
+    return patterns;
+  }
+
+  async trainSiteSpecificModel(siteId: string, siteType: string) {
+    const trainingData = await this.collectTrainingData(siteId, siteType);
+
+    if (trainingData.length < 10) {
+      throw new Error(
+        "Insufficient training data. Need at least 10 approved posts."
+      );
+    }
+
+    // Create fine-tuning job
+    const fineTuningJob = await this.createFineTuningJob({
+      baseModel: "gpt-4-turbo",
+      trainingData: trainingData,
+      siteConfig: await this.getSiteConfig(siteId, siteType),
+    });
+
+    return fineTuningJob;
+  }
+
+  async generateContentWithSiteModel(siteId: string, request: ContentRequest) {
+    // Check if site has trained model
+    const siteModel = await this.getSiteModel(siteId);
+
+    if (siteModel && siteModel.performance_score > 8.0) {
+      // Use site-specific model
+      return await this.generateWithSiteModel(siteModel, request);
+    } else {
+      // Use general model with site preferences
+      return await this.generateWithSitePreferences(siteId, request);
+    }
+  }
+}
+```
+
+### Automated Content Pipeline
+
+```typescript
+// services/AutomatedContentPipeline.ts
+export class AutomatedContentPipeline {
+  async setupAutomation(siteId: string, config: AutomationConfig) {
+    // 1. Create automated job
+    const job = await this.createAutomationJob({
+      siteId,
+      contentType: config.contentType,
+      frequency: config.frequency, // daily, weekly, monthly
+      sourceStrategy: config.sourceStrategy, // trending_topics, competitor_analysis, keyword_research
+      generationSettings: config.generationSettings,
+    });
+
+    // 2. Schedule recurring job
+    await this.scheduleRecurringJob(job);
+
+    return job;
+  }
+
+  async executeAutomatedGeneration(jobId: string) {
+    const job = await this.getJob(jobId);
+    const site = await this.getSite(job.site_id, job.site_type);
+
+    // 1. Research trending topics or source content
+    const sources = await this.researchContentSources(job.job_config);
+
+    // 2. Generate content using site-specific model
+    const generatedContent = await this.generateContentBatch(sources, site);
+
+    // 3. Quality check and review
+    const qualityScores = await this.qualityCheck(generatedContent);
+
+    // 4. Auto-publish high-quality content or queue for review
+    for (const content of generatedContent) {
+      if (content.qualityScore > 8.5 && site.settings.autoPublish) {
+        await this.publishContent(content, site);
+      } else {
+        await this.queueForReview(content, site);
+      }
+    }
+  }
+}
+```
+
+### Site Performance Analytics
+
+```typescript
+// Multi-site analytics dashboard
+GET /api/v1/analytics/sites-overview?projectId={projectId}
+{
+  "sites": [
+    {
+      "id": "site-1",
+      "name": "Marketing Blog",
+      "type": "wordpress",
+      "metrics": {
+        "totalPosts": 45,
+        "avgQualityScore": 8.7,
+        "avgEngagement": 5.2,
+        "autoPublishRate": 65,
+        "modelPerformance": 8.9
+      },
+      "lastActivity": "2024-01-20T15:30:00Z"
+    },
+    {
+      "id": "page-1",
+      "name": "Company Facebook",
+      "type": "facebook",
+      "metrics": {
+        "totalPosts": 78,
+        "avgQualityScore": 8.1,
+        "avgEngagement": 7.8,
+        "autoPublishRate": 85,
+        "modelPerformance": 8.3
+      },
+      "lastActivity": "2024-01-20T16:45:00Z"
+    }
+  ],
+  "overallMetrics": {
+    "totalSites": 12,
+    "totalContent": 567,
+    "avgQualityScore": 8.4,
+    "automationEfficiency": 78
+  }
+}
+```
+
+### Implementation Phases
+
+#### Phase 1: Multi-Site Foundation (2-3 weeks)
+
+- WordPress sites management interface
+- Facebook pages management interface
+- Site-specific settings and preferences
+- Basic site connection and testing
+
+#### Phase 2: Site-Specific Training (3-4 weeks)
+
+- Approved content tracking per site
+- Performance metrics collection
+- Site-specific AI training pipeline
+- Model performance evaluation
+
+#### Phase 3: Automated Content Pipeline (4-5 weeks)
+
+- Automated content generation jobs
+- Quality-based auto-publishing
+- Content scheduling and management
+- Error handling and monitoring
+
+#### Phase 4: Advanced Analytics & Optimization (2-3 weeks)
+
+- Multi-site performance dashboard
+- Site comparison and optimization suggestions
+- A/B testing for content strategies
+- ROI analytics per site
+
+### Benefits của Architecture này
+
+1. **Scalability**: Có thể quản lý hàng trăm sites/pages
+2. **Personalization**: AI được fine-tune riêng cho từng site
+3. **Efficiency**: Automated pipeline giảm manual work 90%
+4. **Quality**: Site-specific training cải thiện content quality
+5. **Analytics**: Deep insights cho optimization chiến lược
+
+### Technical Considerations
+
+- **Security**: Encrypted credentials, secure API access
+- **Performance**: Efficient queuing system, background processing
+- **Reliability**: Error handling, retry mechanisms, monitoring
+- **Cost Optimization**: Intelligent AI provider selection, caching
+- **Compliance**: Platform policies, content guidelines
+
 ---
 
 **Tài liệu này sẽ được cập nhật thường xuyên khi có thay đổi trong yêu cầu hoặc implementation.**

@@ -119,9 +119,13 @@ export interface ContentGenerationRequest {
   requirements: {
     wordCount?: string;
     includeImages?: boolean;
+    includeHeadings?: boolean;
+    includeCTA?: boolean;
     seoOptimized?: boolean;
     tone?: string;
   };
+  context?: string;
+  preferredProvider?: 'openai' | 'gemini' | 'auto';
 }
 
 export interface ContentGenerationResponse {
@@ -331,4 +335,88 @@ export enum WebhookEventType {
   CONTENT_FAILED = "content.failed",
   USER_REGISTERED = "user.registered",
   PROJECT_CREATED = "project.created",
+}
+
+// Additional types for services
+export interface WordPressCredentials {
+  siteUrl: string;
+  username: string;
+  applicationPassword: string;
+}
+
+export interface PublishingSettings {
+  status?: "draft" | "publish";
+  categories?: string[];
+  tags?: string[];
+  scheduledDate?: Date;
+}
+
+export interface GeneratedContent {
+  title: string;
+  body: string;
+  excerpt?: string;
+  metadata: ContentMetadata;
+  qualityScore?: number;
+  seoTitle?: string;
+  seoDescription?: string;
+  keywords?: string[];
+  wordCount?: number;
+  aiProvider?: string;
+  sourceReference?: {
+    url: string;
+    title: string;
+    usedAsReference: boolean;
+    rewriteStyle: 'similar' | 'improved' | 'different_angle' | 'expanded';
+  };
+}
+
+export interface ScrapingOptions {
+  timeout?: number;
+  waitFor?: string;
+  userAgent?: string;
+  enableJavaScript?: boolean;
+}
+
+export interface ScrapingResult {
+  url: string;
+  title: string;
+  content: string;
+  metadata: {
+    description?: string;
+    author?: string;
+    publishDate?: string;
+    images: string[];
+    wordCount: number;
+    language: string;
+  };
+  qualityScore: number;
+  scrapedAt: string;
+}
+
+// Batch processing types
+export interface BatchJob {
+  id: string;
+  projectId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: {
+    total: number;
+    crawled: number;
+    generated: number;
+    failed: number;
+  };
+  settings: any;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ContentWorkflowItem {
+  id: string;
+  sourceUrl: string;
+  status: 'pending' | 'crawling' | 'crawled' | 'generating' | 'generated' | 'approved' | 'failed';
+  scrapedContent?: ScrapingResult;
+  generatedContent?: GeneratedContent;
+  settings?: any;
+  errorMessage?: string;
+  createdAt: Date;
+  updatedAt: Date;
 } 

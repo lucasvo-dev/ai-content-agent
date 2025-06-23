@@ -75,4 +75,4 @@ export const CardContent: React.FC<CardContentProps> = ({ children, className })
   </div>
 );
 
-export default Card; 
+export { Card }; 
