@@ -243,7 +243,7 @@ export function LinkContentWorkflow() {
 7.  **COMPLETE REWRITING**: Rewrite every sentence. No verbatim copying.
 8.  **BRAND INTEGRATION**: Replace competing brands with "${brandName}".
 9.  **AUDIENCE/TONE**: Write for "${targetAudience}" with a ${tone} tone.
-10. **KEYWORDS**: Naturally integrate these keywords: "${keywords}".
+10. **KEYWORD INTEGRATION (MANDATORY)**: You MUST strategically weave the following keywords throughout the article. They must be part of the natural sentence flow and not feel forced. Keywords: "${keywords}".
 11. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}
 
 ### HTML FORMAT EXAMPLE:
@@ -276,7 +276,8 @@ export function LinkContentWorkflow() {
 8.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
 9.  **TONE**: Write for "${targetAudience}" with a ${tone} tone.
 10. **BRAND REPLACEMENT (MANDATORY)**: You MUST replace any brand name found in the source article with "${brandName}". This is a critical instruction. Do not mention the original brand.
-11. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}`;
+11. **KEYWORD INTEGRATION (MANDATORY)**: You MUST integrate the following keywords naturally into the body of the post. Do not just list them as hashtags. Keywords: "${keywords}".
+12. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}`;
     
     if (contentType === 'wordpress_blog') {
       finalPrompt = wordpressPrompt;
