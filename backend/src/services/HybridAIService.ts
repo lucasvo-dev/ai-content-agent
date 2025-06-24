@@ -113,120 +113,142 @@ export class HybridAIService {
 
   async generateContent(request: ContentGenerationRequest): Promise<GeneratedContent> {
     const startTime = Date.now();
-    console.log('🚀 HybridAIService: Starting content generation');
-    console.log('Request details:', {
-      type: request.type,
-      topic: request.topic,
-      preferredProvider: request.preferredProvider || 'auto',
-      brandVoice: request.brandVoice
-    });
+    let selectedProvider: AIProvider;
+    let originalError: Error | null = null;
+    let retryAttempted = false;
 
     try {
-      // Select provider based on request and strategy
-      const selectedProvider = this.selectProvider(request);
-      console.log(`🎯 Selected provider: ${selectedProvider}`);
+      // Select initial provider
+      selectedProvider = this.selectProvider(request);
+      console.log(`🚀 Starting content generation with provider: ${selectedProvider}`);
 
       let result: GeneratedContent;
-      let providerUsed = selectedProvider;
 
-      if (selectedProvider === 'openai' && this.openai) {
-        console.log('🤖 Using OpenAI for generation');
-        result = await this.generateWithOpenAI(request);
-      } else if (selectedProvider === 'gemini' && this.gemini) {
-        console.log('🧠 Using Gemini for generation');
-        result = await this.generateWithGemini(request);
-      } else {
-        console.log('📝 Using fallback template generation');
-        result = await this.generateFallbackContent(request);
-        providerUsed = 'fallback';
+      // Try primary provider
+      try {
+        if (selectedProvider === 'openai') {
+          result = await this.generateWithOpenAI(request);
+        } else if (selectedProvider === 'gemini') {
+          result = await this.generateWithGemini(request);
+        } else {
+          throw new Error(`Unknown provider: ${selectedProvider}`);
+        }
+
+        // Success with primary provider
+        const responseTime = Date.now() - startTime;
+        this.updateStats(selectedProvider, true, result.metadata?.cost || 0, responseTime);
+
+        console.log(`✅ Content generated successfully with ${selectedProvider} (${responseTime}ms)`);
+        return {
+          ...result,
+          metadata: {
+            ...result.metadata,
+            selectedProvider,
+            requestedProvider: request.preferredProvider || 'auto',
+            selectionReason: 'primary_choice',
+            responseTime
+          }
+        };
+
+      } catch (primaryError) {
+        originalError = primaryError as Error;
+        console.error(`❌ Primary provider ${selectedProvider} failed:`, originalError.message);
+
+        // Try alternative provider for retryable errors
+        const isRetryable = this.isRetryableError(originalError);
+        if (isRetryable) {
+          const alternativeProvider = selectedProvider === 'openai' ? 'gemini' : 'openai';
+          
+          if (this.isProviderAvailable(alternativeProvider)) {
+            console.log(`🔄 Retrying with alternative provider: ${alternativeProvider}`);
+            retryAttempted = true;
+            
+            try {
+              if (alternativeProvider === 'openai') {
+                result = await this.generateWithOpenAI(request);
+              } else {
+                result = await this.generateWithGemini(request);
+              }
+
+              // Success with alternative provider
+              const responseTime = Date.now() - startTime;
+              this.updateStats(alternativeProvider, true, result.metadata?.cost || 0, responseTime);
+
+              console.log(`✅ Content generated successfully with fallback ${alternativeProvider} (${responseTime}ms)`);
+              return {
+                ...result,
+                metadata: {
+                  ...result.metadata,
+                  selectedProvider: alternativeProvider,
+                  requestedProvider: request.preferredProvider || 'auto',
+                  selectionReason: 'fallback_after_error',
+                  originalError: originalError.message,
+                  responseTime
+                }
+              };
+            } catch (secondaryError) {
+              console.error(`❌ Alternative provider ${alternativeProvider} also failed:`, secondaryError);
+              this.updateStats(alternativeProvider, false, 0, Date.now() - startTime);
+              
+              // Both providers failed - throw comprehensive error
+              throw new Error(`All AI providers failed. Primary (${selectedProvider}): ${originalError.message}. Alternative (${alternativeProvider}): ${(secondaryError as Error).message}`);
+            }
+          } else {
+            console.warn(`⚠️ Alternative provider not available, cannot retry`);
+          }
+        }
+
+        // If not retryable or no alternative, throw original error
+        throw originalError;
       }
 
-      // Add provider selection info to metadata
-      result.metadata = {
-        ...result.metadata,
-        selectedProvider,
-        requestedProvider: request.preferredProvider || 'auto',
-        selectionReason: request.preferredProvider && request.preferredProvider !== 'auto' 
-          ? 'manual_selection' 
-          : 'intelligent_selection',
-        responseTime: Date.now() - startTime
-      };
-
-      // Update stats
-      const responseTime = Date.now() - startTime;
-      this.updateStats(providerUsed, true, result.metadata.cost || 0, responseTime);
-
-      console.log('✅ Content generation completed successfully');
-      console.log(`⏱️ Response time: ${responseTime}ms`);
-      return result;
-
     } catch (error) {
-      console.error('❌ Content generation failed:', error);
-      
-      // Update stats for failure
       const responseTime = Date.now() - startTime;
-      const attemptedProvider = this.selectProvider(request);
-      this.updateStats(attemptedProvider, false, 0, responseTime);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
-      // Try fallback if primary generation fails
-      console.log('🔄 Attempting fallback generation');
-      const fallbackResult = await this.generateFallbackContent(request);
+      // Update failure stats
+      this.updateStats(selectedProvider!, false, 0, responseTime);
       
-      fallbackResult.metadata = {
-        ...fallbackResult.metadata,
-        selectedProvider: 'fallback',
-        requestedProvider: request.preferredProvider || 'auto',
-        selectionReason: 'error_fallback',
-        originalError: error instanceof Error ? error.message : 'Unknown error',
-        responseTime: Date.now() - startTime
-      };
+      console.error(`💥 Content generation completely failed after ${responseTime}ms:`, errorMessage);
       
-      return fallbackResult;
+      // NO FALLBACK CONTENT - Always throw real errors
+      throw new Error(`AI content generation failed: ${errorMessage}. Please try again or check your AI provider configuration.`);
     }
   }
 
   private selectProvider(request: ContentGenerationRequest): AIProvider {
     // Manual selection takes priority
     if (request.preferredProvider && request.preferredProvider !== 'auto') {
-      console.log(`🎯 Manual provider selection: ${request.preferredProvider}`);
-      
-      // Validate provider availability and return immediately if valid
-      if (request.preferredProvider === 'openai' && this.openai) {
-        console.log('✅ Manual OpenAI selection - provider available');
+      if (this.isProviderAvailable(request.preferredProvider)) {
+        console.log(`🎯 Using manual selection: ${request.preferredProvider}`);
+        return request.preferredProvider;
+      }
+      console.warn(`⚠️ Preferred provider ${request.preferredProvider} not available, falling back to auto`);
+    }
+    
+    // Auto selection: Prefer Gemini for reliability and speed
+    // Only use OpenAI for very complex content requiring premium quality
+    const complexity = this.assessComplexity(request);
+    const urgency = this.assessUrgency(request);
+    
+    // Prefer Gemini for most cases (fast, reliable, free)
+    if (this.isProviderAvailable('gemini')) {
+      // Only use OpenAI for very high complexity content
+      if (complexity > 0.8 && urgency < 0.5 && this.isProviderAvailable('openai')) {
+        console.log('🔵 Auto-selected OpenAI for high complexity content');
         return 'openai';
       }
-      if (request.preferredProvider === 'gemini' && this.gemini) {
-        console.log('✅ Manual Gemini selection - provider available');
-        return 'gemini';
-      }
-      
-      // Fallback if preferred provider not available
-      console.log(`⚠️ Preferred provider ${request.preferredProvider} not available, falling back to intelligent selection`);
+      console.log('🟢 Auto-selected Gemini for fast, reliable generation');
+      return 'gemini';
     }
-
-    // Existing intelligent selection logic only if no manual selection or manual selection failed
-    if (this.provider === 'openai' && this.openai) return 'openai';
-    if (this.provider === 'gemini' && this.gemini) return 'gemini';
-
-    // Hybrid strategy - intelligent selection with performance consideration
-    const factors = {
-      complexity: this.assessComplexity(request),
-      urgency: this.assessUrgency(request),
-      cost: this.assessCostSensitivity(request),
-      performance: this.assessProviderPerformance(),
-    };
-
-    console.log('Selection factors:', factors);
-
-    // Use OpenAI for complex, high-value content or when Gemini performance is poor
-    if (factors.complexity > 0.7 || 
-        (factors.urgency < 0.5 && factors.cost < 0.5) ||
-        factors.performance.preferOpenAI) {
-      return this.openai ? 'openai' : (this.gemini ? 'gemini' : 'openai');
+    
+    // Fallback to OpenAI if Gemini unavailable
+    if (this.isProviderAvailable('openai')) {
+      console.log('🔵 Auto-selected OpenAI (Gemini unavailable)');
+      return 'openai';
     }
-
-    // Use Gemini for simpler, cost-sensitive content
-    return this.gemini ? 'gemini' : (this.openai ? 'openai' : 'gemini');
+    
+    throw new Error('No AI providers available');
   }
 
   private assessProviderPerformance(): { preferOpenAI: boolean; preferGemini: boolean } {
@@ -292,14 +314,17 @@ export class HybridAIService {
     console.log('🔵 Using OpenAI GPT-4 Turbo...');
 
     const prompt = this.buildPrompt(request);
+    const isDetailedPrompt = request.context && request.context.includes('### CRITICAL RULES');
     
     try {
-      const completion = await this.openai!.chat.completions.create({
+      const completionParams: any = {
         model: 'gpt-4-turbo-preview',
         messages: [
           {
             role: 'system',
-            content: 'You are an expert content creator specializing in high-quality, engaging content that converts. Always return valid JSON with the specified structure. Focus on creating valuable, actionable content that resonates with the target audience.'
+            content: isDetailedPrompt 
+              ? 'You are an expert content creator. Follow the detailed instructions provided exactly. Return the content in the format specified in the prompt.'
+              : 'You are an expert content creator specializing in high-quality, engaging content that converts. Always return valid JSON with the specified structure. Focus on creating valuable, actionable content that resonates with the target audience.'
           },
           {
             role: 'user',
@@ -307,11 +332,25 @@ export class HybridAIService {
           }
         ],
         temperature: 0.7,
-        max_tokens: 2000, // Reduced for faster response
-        response_format: { type: 'json_object' },
+        max_tokens: isDetailedPrompt ? 4000 : 2000, // More tokens for detailed content
         presence_penalty: 0.1,
         frequency_penalty: 0.1
+      };
+
+      // Only add JSON format requirement for basic prompts
+      if (!isDetailedPrompt) {
+        completionParams.response_format = { type: 'json_object' };
+      }
+
+      // Add timeout to prevent hanging requests
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('OpenAI request timeout after 120 seconds')), 120000);
       });
+
+      const completion = await Promise.race([
+        this.openai!.chat.completions.create(completionParams),
+        timeoutPromise
+      ]) as any;
 
       const responseContent = completion.choices[0]?.message?.content;
       if (!responseContent) {
@@ -319,11 +358,19 @@ export class HybridAIService {
       }
 
       let parsedContent;
+      
+      if (isDetailedPrompt) {
+        // For detailed prompts, parse as natural text content
+        console.log('📝 Processing natural text output from detailed prompt');
+        parsedContent = this.parseNaturalTextContent(responseContent, request);
+      } else {
+        // For basic prompts, expect JSON format
       try {
         parsedContent = JSON.parse(responseContent);
       } catch (parseError) {
         console.warn('❌ OpenAI JSON parsing failed, using text fallback');
         parsedContent = this.parseTextContent(responseContent, request.type);
+        }
       }
       
       return {
@@ -343,7 +390,8 @@ export class HybridAIService {
           engagementScore: this.calculateEngagementScore(parsedContent.body),
           promptVersion: '1.0',
           tokensUsed: completion.usage?.total_tokens || 0,
-          finishReason: completion.choices[0]?.finish_reason
+          finishReason: completion.choices[0]?.finish_reason,
+          promptType: isDetailedPrompt ? 'detailed_frontend' : 'basic_backend'
         }
       };
     } catch (error) {
@@ -356,16 +404,31 @@ export class HybridAIService {
     console.log('🟢 Using Google Gemini Flash...');
 
     const prompt = this.buildPrompt(request);
+    const isDetailedPrompt = request.context && request.context.includes('### CRITICAL RULES');
     
     try {
-      const result = await this.gemini.generateContent(prompt);
+      // Add timeout to prevent hanging requests
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Gemini request timeout after 45 seconds')), 45000);
+      });
+
+      const result = await Promise.race([
+        this.gemini.generateContent(prompt),
+        timeoutPromise
+      ]) as any;
       const response = await result.response;
       const text = response.text();
 
       console.log('🔍 Gemini raw response:', text.substring(0, 200) + '...');
 
-      // Try to parse as JSON, fallback to text processing
       let parsedContent;
+      
+      if (isDetailedPrompt) {
+        // For detailed prompts, parse as natural text content
+        console.log('📝 Processing natural text output from detailed prompt');
+        parsedContent = this.parseNaturalTextContent(text, request);
+      } else {
+        // For basic prompts, expect JSON format
       try {
         // Remove markdown code blocks if present
         let cleanText = text.replace(/```json\s*/g, '').replace(/\s*```/g, '').trim();
@@ -391,6 +454,7 @@ export class HybridAIService {
         console.warn('❌ Gemini JSON parsing failed:', parseError instanceof Error ? parseError.message : 'Unknown error');
         console.log('🔄 Using text parsing fallback');
         parsedContent = this.parseTextContent(text, request.type);
+        }
       }
 
       // Validate parsed content
@@ -416,7 +480,8 @@ export class HybridAIService {
           engagementScore: this.calculateEngagementScore(parsedContent.body),
           promptVersion: '1.0',
           tokensUsed: 0,
-          safetyRatings: result.response.candidates?.[0]?.safetyRatings || []
+          safetyRatings: result.response.candidates?.[0]?.safetyRatings || [],
+          promptType: isDetailedPrompt ? 'detailed_frontend' : 'basic_backend'
         }
       };
     } catch (error) {
@@ -426,6 +491,14 @@ export class HybridAIService {
   }
 
   private buildPrompt(request: ContentGenerationRequest): string {
+    // PRIORITY: If frontend provides detailed context/prompt, use it directly
+    if (request.context && request.context.includes('### CRITICAL RULES')) {
+      console.log('🎯 Using detailed frontend context/prompt');
+      return request.context;
+    }
+
+    // FALLBACK: Generate basic prompt only if no detailed context provided
+    console.log('📝 Using basic backend prompt generation');
     const wordCountText = request.requirements?.wordCount || '500-800 words';
     
     return `Write a ${request.type.replace('_', ' ')} about "${request.topic}" for ${request.targetAudience}.
@@ -477,43 +550,77 @@ Return ONLY valid JSON:
     };
   }
 
-  private generateFallbackContent(request: ContentGenerationRequest): GeneratedContent {
-    const title = `${request.topic}: A Comprehensive Guide for ${request.targetAudience}`;
-    const body = `# ${title}
-
-This content is currently being generated. Our AI system is working to create high-quality, engaging content that matches your brand voice and requirements.
-
-## Key Topics to Cover:
-${request.keywords.map(keyword => `- ${keyword}`).join('\n')}
-
-## Target Audience:
-${request.targetAudience}
-
-## Brand Voice:
-- Tone: ${request.brandVoice.tone}
-- Style: ${request.brandVoice.style}
-- Vocabulary: ${request.brandVoice.vocabulary}
-
-${request.requirements?.includeCTA ? '\n## Call to Action\nReady to learn more? Contact us today!' : ''}`;
-
-    return {
-      id: `fallback-${Date.now()}`,
-      title,
-      body,
-      excerpt: `A comprehensive guide about ${request.topic} tailored for ${request.targetAudience}.`,
-      type: request.type,
-      metadata: {
-        provider: 'fallback',
-        aiModel: 'template',
-        cost: 0,
-        generatedAt: new Date().toISOString(),
-        wordCount: this.countWords(body),
-        seoScore: 75,
-        readabilityScore: 80,
-        engagementScore: 70,
-        promptVersion: '1.0',
-        tokensUsed: 0
+  private parseNaturalTextContent(text: string, request: ContentGenerationRequest): any {
+    console.log('🔍 Parsing natural text content from detailed prompt');
+    
+    // Clean the text and extract content
+    let cleanText = text.trim();
+    
+    // Remove HTML wrapper if present (<!DOCTYPE>, <html>, <head>, <body> tags)
+    if (cleanText.includes('<!DOCTYPE') || cleanText.includes('<html')) {
+      // Extract content from body tag
+      const bodyMatch = cleanText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) {
+        cleanText = bodyMatch[1].trim();
+      } else {
+        // If no body tag found, remove common wrapper tags manually
+        cleanText = cleanText
+          .replace(/<!DOCTYPE[^>]*>/gi, '')
+          .replace(/<html[^>]*>/gi, '')
+          .replace(/<\/html>/gi, '')
+          .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+          .replace(/<body[^>]*>/gi, '')
+          .replace(/<\/body>/gi, '')
+          .trim();
       }
+    }
+    
+    // Extract title - look for first h1 tag or first line
+    let title = '';
+    let body = cleanText;
+    
+    // Try to find h1 heading first
+    const h1Match = cleanText.match(/<h1[^>]*>(.*?)<\/h1>/i);
+    if (h1Match) {
+      title = h1Match[1].replace(/<[^>]*>/g, '').trim(); // Remove any HTML tags from title
+      // Remove the title from body
+      body = cleanText.replace(/<h1[^>]*>.*?<\/h1>/i, '').trim();
+    } else {
+      // Try markdown-style heading
+      const markdownH1 = cleanText.match(/^#+\s+(.+)$/m);
+      if (markdownH1) {
+        title = markdownH1[1].trim();
+        body = cleanText.replace(/^#+\s+.+$/m, '').trim();
+      } else {
+        // Fallback: use first line if it's short enough
+        const lines = cleanText.split('\n');
+        const firstLine = lines[0]?.replace(/<[^>]*>/g, '').trim();
+        if (firstLine && firstLine.length < 100 && firstLine.length > 10) {
+          title = firstLine;
+          body = lines.slice(1).join('\n').trim();
+        } else {
+          // Generate title from request topic
+          title = request.topic;
+        }
+      }
+    }
+    
+    // Ensure we have clean WordPress-ready HTML content
+    // Remove any remaining problematic tags but keep content structure
+    body = body
+      .replace(/<title[^>]*>.*?<\/title>/gi, '')
+      .replace(/<meta[^>]*>/gi, '')
+      .replace(/^\s*<[^>]*>\s*$/gm, '') // Remove lines with only HTML tags
+      .replace(/\n\s*\n\s*\n/g, '\n\n') // Clean up excessive line breaks
+      .trim();
+    
+    console.log(`📝 Extracted title: "${title}"`);
+    console.log(`📄 Content length: ${body.length} characters`);
+    
+    return {
+      title: title || `Generated ${request.type.replace('_', ' ')}`,
+      body: body,
+      excerpt: this.generateExcerpt(body),
     };
   }
 
@@ -801,5 +908,28 @@ ${request.requirements?.includeCTA ? '\n## Call to Action\nReady to learn more? 
     }
     
     return recommendations;
+  }
+
+  private isProviderAvailable(provider: string): boolean {
+    if (provider === 'openai' && this.openai) return true;
+    if (provider === 'gemini' && this.gemini) return true;
+    return false;
+  }
+
+  private isRetryableError(error: Error): boolean {
+    const retryablePatterns = [
+      'timeout',
+      'rate limit',
+      'service unavailable',
+      'connection',
+      'network',
+      '503',
+      '502',
+      '500',
+      '429'
+    ];
+    
+    const errorMessage = error.message.toLowerCase();
+    return retryablePatterns.some(pattern => errorMessage.includes(pattern));
   }
 } 

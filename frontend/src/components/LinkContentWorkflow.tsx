@@ -179,42 +179,88 @@ export function LinkContentWorkflow() {
   };
 
   // REAL AI Integration - Call actual API like ContentGenerator
-  const generateContentWithSettings = async (sourceItem: URLItem, settings: LLMSettings) => {
-    const { contentType, tone, language, targetAudience, brandName, keywords, specialRequest } = settings;
-    const sourceTitle = sourceItem.crawledContent?.title || 'Content';
+  const generateContentWithSettings = async (
+    sourceItem: URLItem, 
+    settings: LLMSettings,
+    retryCount: number = 0
+  ): Promise<{
+    title: string;
+    body: string;
+    sourceUrl: string;
+    metadata?: {
+      sourceTitle: string;
+      settings: LLMSettings;
+      wordCount?: number;
+      qualityScore?: number;
+      aiModel?: string;
+      retryCount?: number;
+    };
+  }> => {
+    const maxRetries = 2; // Allow up to 2 retries
     const sourceContent = sourceItem.crawledContent?.content || '';
+    const sourceTitle = sourceItem.crawledContent?.title || 'Untitled';
     const sourceUrl = sourceItem.url;
-    
-    // If no source content, return error instead of hard-coded fallback
-    if (!sourceContent || sourceContent.length < 100) {
-      throw new Error(`Insufficient source content from ${sourceUrl}. Please ensure the URL was crawled successfully and contains adequate content.`);
-    }
 
-    // --- DYNAMIC PROMPT LOGIC ---
+    const {
+      contentType, 
+      language, 
+      tone, 
+      targetAudience, 
+      brandName, 
+      keywords, 
+      specialRequest
+    } = settings;
+
     let finalPrompt = '';
 
-    const wordpressPrompt = `You are an expert content creator and SEO specialist. Your task is to rewrite the provided 'SOURCE ARTICLE' into a comprehensive, SEO-friendly WordPress blog post. The output must be in Markdown format, ready to be pasted directly into the WordPress block editor.
+    const wordpressPrompt = `You are an expert content writer specializing in WordPress blog content. Your task is to transform the 'SOURCE ARTICLE' into high-quality WordPress-ready content.
 
 ### CRITICAL RULES (Follow Strictly):
 
-1.  **OUTPUT FORMAT**: The ENTIRE output must be valid Markdown. Do NOT use HTML tags.
-2.  **MARKDOWN STRUCTURE**:
-    - Use \`##\` for main section titles.
-    - Use \`###\` for subsections.
-    - Use double line breaks for paragraphs.
-    - Use \`**\` for bolding important keywords.
-    - Use \`* \` for bullet points.
-    - Use \`1. \` for numbered lists.
-    - Use \`> \` for quotes.
+1.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for WordPress editor. Use proper HTML tags for structure and formatting. DO NOT include <html>, <head>, <body> tags - only provide the content HTML that goes directly into WordPress post editor.
+2.  **HTML STRUCTURE**:
+    - Use <h2> for main section titles
+    - Use <h3> for subsections
+    - Use <p> tags for all paragraphs
+    - Use <strong> for bolding important keywords
+    - Use <ul> and <li> for bullet points
+    - Use <ol> and <li> for numbered lists
+    - Use <blockquote> for quotes
+    - Use <br> sparingly, prefer proper paragraph tags
+    - DO NOT include any backticks, code blocks, or markdown syntax
+    - Content must be completely clean and ready for copy-paste to WordPress
 3.  **STRUCTURAL MIRRORING (MOST IMPORTANT)**: You MUST mirror the exact structure of the source article. If the source has 5 sections and 2 lists, your output MUST have the same.
-4.  **LENGTH REQUIREMENT (NON-NEGOTIABLE)**: The final article's word count MUST be **ABSOLUTELY NO LESS THAN 1000 words**, and should ideally be between 1000 and 2000 words. This is a strict minimum. If the source material is short, you are required to expand on each point, add detailed explanations, and provide examples to meet this target. Do not summarize. Your primary task is expansion to meet the word count. Failure to meet the 1000-word minimum will result in the output being rejected.
+4.  **LENGTH REQUIREMENT (NON-NEGOTIABLE)**: The final article MUST contain at least 1000 words. COUNT EVERY WORD. This is MANDATORY and NON-NEGOTIABLE. If your output has fewer than 1000 words, it will be automatically rejected and you must try again. To meet this requirement:
+    - Expand each section with detailed explanations and examples
+    - Add comprehensive background information  
+    - Include practical tips and actionable advice
+    - Provide case studies or real-world applications
+    - Add thorough analysis and insights
+    - NEVER use filler content - every word must add value
+    - The 1000-word minimum is just the START - aim for 1500-2000 words for best results
 5.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
 6.  **CONTENT FIDELITY**: Base the content EXCLUSIVELY on the 'SOURCE ARTICLE'.
 7.  **COMPLETE REWRITING**: Rewrite every sentence. No verbatim copying.
 8.  **BRAND INTEGRATION**: Replace competing brands with "${brandName}".
 9.  **AUDIENCE/TONE**: Write for "${targetAudience}" with a ${tone} tone.
 10. **KEYWORDS**: Naturally integrate these keywords: "${keywords}".
-11. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}`;
+11. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}
+
+### HTML FORMAT EXAMPLE:
+<h2>Main Section Title</h2>
+<p>This is a paragraph with <strong>important keywords</strong> highlighted properly for WordPress.</p>
+
+<h3>Subsection Title</h3>
+<p>Another paragraph with proper HTML formatting.</p>
+
+<ul>
+<li>Bullet point one with valuable information</li>
+<li>Bullet point two with additional details</li>
+</ul>
+
+<blockquote>
+<p>This is a quote or important statement formatted properly.</p>
+</blockquote>`;
 
     const facebookPrompt = `You are an expert social media manager. Your task is to transform the 'SOURCE ARTICLE' into a highly engaging Facebook post.
 
@@ -229,7 +275,7 @@ export function LinkContentWorkflow() {
 7.  **LENGTH**: The entire post should be between 400 and 800 characters. DO NOT exceed this.
 8.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
 9.  **TONE**: Write for "${targetAudience}" with a ${tone} tone.
-10. **BRAND MENTION**: Mention "${brandName}" naturally in the post.
+10. **BRAND REPLACEMENT (MANDATORY)**: You MUST replace any brand name found in the source article with "${brandName}". This is a critical instruction. Do not mention the original brand.
 11. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}`;
     
     if (contentType === 'wordpress_blog') {
@@ -250,13 +296,11 @@ ${sourceContent}
 ---
 
 ### OUTPUT REQUIREMENTS:
-Provide ONLY the final content based on the specified format (Markdown for WordPress, plain text with emojis for Facebook). Do not add any meta-commentary, explanations, or notes.`;
-
+Provide ONLY the final content based on the specified format (HTML for WordPress, plain text with emojis for Facebook). Do not add any meta-commentary, explanations, or notes. The HTML should be ready for direct copy-paste into WordPress editor.`;
 
     try {
-      // Create content generation request similar to ContentGenerator
+      // Create content generation request with timeout
       const request = {
-        // Map to a type the API understands, for now. Backend should be updated later.
         type: 'blog_post' as const, 
         topic: sourceTitle,
         targetAudience: targetAudience,
@@ -271,11 +315,30 @@ Provide ONLY the final content based on the specified format (Markdown for WordP
         preferredProvider: settings.preferredProvider,
       };
 
-      // Call the actual AI API
-      console.log('🚀 Calling AI API with request:', request);
-      const generatedContent = await aiApi.generateContent(request);
+      console.log(`🚀 Calling AI API (attempt ${retryCount + 1}/${maxRetries + 1}):`, { 
+        provider: request.preferredProvider,
+        topic: request.topic,
+        retryCount 
+      });
+
+      // Add client-side timeout
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Request timeout after 90 seconds'));
+        }, 90000); // 90 second client timeout
+      });
+
+      const generatedContent = await Promise.race([
+        aiApi.generateContent(request),
+        timeoutPromise
+      ]);
       
-      console.log('✅ AI API response:', generatedContent);
+      console.log('✅ AI API response:', {
+        title: generatedContent.title?.substring(0, 50),
+        wordCount: generatedContent.metadata?.wordCount,
+        provider: generatedContent.metadata?.provider,
+        model: generatedContent.metadata?.aiModel
+      });
       
       return {
         title: generatedContent.title,
@@ -287,14 +350,35 @@ Provide ONLY the final content based on the specified format (Markdown for WordP
           wordCount: generatedContent.metadata?.wordCount,
           qualityScore: generatedContent.metadata?.seoScore,
           aiModel: generatedContent.metadata?.aiModel,
+          retryCount: retryCount
         }
       };
 
     } catch (error) {
-      console.error('❌ AI API Error:', error);
+      console.error(`❌ AI API Error (attempt ${retryCount + 1}):`, error);
       
-      // NO MORE HARD-CODED FALLBACK - Let the error bubble up
-      throw new Error(`AI content generation failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again or check your AI provider settings.`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isRetryableError = 
+        errorMessage.includes('timeout') || 
+        errorMessage.includes('rate limit') ||
+        errorMessage.includes('network') ||
+        errorMessage.includes('503') ||
+        errorMessage.includes('502') ||
+        errorMessage.includes('500');
+      
+      // Retry logic for retryable errors
+      if (isRetryableError && retryCount < maxRetries) {
+        console.log(`🔄 Retrying... (${retryCount + 1}/${maxRetries})`);
+        
+        // Exponential backoff: 2s, 4s, 8s
+        const delayMs = Math.pow(2, retryCount + 1) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        
+        return generateContentWithSettings(sourceItem, settings, retryCount + 1);
+      }
+      
+      // Final failure - no more retries
+      throw new Error(`AI content generation failed after ${retryCount + 1} attempts: ${errorMessage}. ${isRetryableError ? 'All retries exhausted.' : 'Not retryable.'}`);
     }
   };
 
@@ -412,21 +496,23 @@ Provide ONLY the final content based on the specified format (Markdown for WordP
     if (!contentToRegenerate) return;
 
     const sourceItem = urlItems.find(item => item.url === contentToRegenerate.sourceUrl);
-    if (!sourceItem) return;
+    if (!sourceItem?.crawledContent) {
+      toast.error('Source content not found. Please re-crawl the URL first.');
+      return;
+    }
 
     // Update status to generating
     setGeneratedContent(prev => prev.map(item => 
       item.id === contentId 
-        ? { ...item, status: 'generating' as const, title: 'Regenerating...', body: 'Creating new content...' }
+        ? { ...item, status: 'generating' as const, title: 'Regenerating content...', body: 'Creating new content with improved settings...' }
         : item
     ));
 
     try {
-      // Generate new content
-      const regeneratedData = await generateContentWithSettings(sourceItem, llmSettings);
+      console.log('🔄 Regenerating content for:', contentToRegenerate.sourceUrl);
       
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Generate new content with retry logic
+      const regeneratedData = await generateContentWithSettings(sourceItem, llmSettings);
 
       setGeneratedContent(prev => prev.map(item => 
         item.id === contentId ? {
@@ -441,14 +527,26 @@ Provide ONLY the final content based on the specified format (Markdown for WordP
         } : item
       ));
 
-      toast.success('Content regenerated successfully!');
+      const retryInfo = regeneratedData.metadata?.retryCount ? ` (${regeneratedData.metadata.retryCount + 1} attempts)` : '';
+      toast.success(`Content regenerated successfully!${retryInfo}`);
+      
     } catch (error) {
+      console.error('❌ Regeneration failed:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
       setGeneratedContent(prev => prev.map(item => 
         item.id === contentId 
-          ? { ...item, status: 'failed' as const, title: 'Regeneration Failed', body: 'Failed to regenerate content' }
+          ? { 
+              ...item, 
+              status: 'failed' as const, 
+              title: 'Regeneration Failed', 
+              body: `❌ Failed to regenerate content: ${errorMessage}\n\nYou can try regenerating again or check your AI provider settings.`
+            }
           : item
       ));
-      toast.error('Failed to regenerate content');
+      
+      toast.error(`Regeneration failed: ${errorMessage.split(':')[0]}`);
     }
   };
 
@@ -914,7 +1012,7 @@ function SettingsStep({
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 <option value="vietnamese">🇻🇳 Vietnamese</option>
-                <option value="english">🇺🇸 English</option>
+                <option value="english">🇸 English</option>
               </select>
             </div>
           </div>
