@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { WebScrapingService } from './WebScrapingService';
 import { HybridAIService } from './HybridAIService';
 import { logger } from '../utils/logger';
+import { ContentType, ContentStatus } from '../types';
 import type { 
   BatchJob, 
   ContentWorkflowItem, 
@@ -498,7 +499,7 @@ Please create new content based on this source material.`;
 
       // Prepare enhanced generation request
       const generationRequest: ContentGenerationRequest = {
-        type: settings.contentType || 'blog_post',
+        type: (settings.contentType as ContentType) || ContentType.BLOG_POST,
         topic: settings.topic || item.scrapedContent.title,
         targetAudience: settings.targetAudience || 'General audience',
         keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],
@@ -518,10 +519,11 @@ Please create new content based on this source material.`;
         preferredProvider: settings.preferredProvider || 'auto'
       };
 
-      const generatedContent = await this.aiService.generateContent(generationRequest);
+      const generatedContent = await this.aiService.generateContent(generationRequest as any);
 
       item.generatedContent = {
         ...generatedContent,
+        status: ContentStatus.DRAFT,
         sourceReference: {
           url: item.sourceUrl,
           title: item.scrapedContent.title,

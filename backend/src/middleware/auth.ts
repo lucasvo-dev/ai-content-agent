@@ -177,7 +177,7 @@ export const requireRole = (allowedRoles: string[]) => {
 export const requireAdmin = requireRole(["admin"]);
 
 // Editor or Admin middleware
-export const requireEditor = requireRole(["admin", "editor"]);
+export const requireEditor = requireRole(["admin", "editor"]); 
 
 // Export AuthenticatedRequest for use in other modules
 export { AuthenticatedRequest } from "@/types";

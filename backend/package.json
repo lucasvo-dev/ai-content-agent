@@ -5,9 +5,9 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/dev-server.ts",
-    "build": "echo 'TypeScript build skipped for deployment'",
-    "build:prod": "echo 'TypeScript build skipped for deployment'",
-    "start": "npx ts-node -r tsconfig-paths/register src/server.ts",
+    "build": "tsc --build",
+    "build:prod": "tsc --build --force",
+    "start": "node dist/production-server.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

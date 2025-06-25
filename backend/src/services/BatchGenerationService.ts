@@ -173,7 +173,10 @@ export class BatchGenerationService {
       throw new Error('Batch job not found');
     }
 
-    return job.results || [];
+    // Extract GeneratedContent from each task's result property
+    return job.results
+      .map(task => task.result)
+      .filter((result): result is GeneratedContent => !!result);
   }
 
   private async processBatchGeneration(jobData: BatchJobData): Promise<void> {
@@ -225,7 +228,7 @@ export class BatchGenerationService {
 
       // Generate content using AI service
       const generatedContent = await this.aiService.generateContent({
-        type: settings.contentType,
+        type: settings.contentType as 'blog_post' | 'social_media' | 'email' | 'ad_copy',
         topic: this.extractMainTopic(crawledContent),
         brandVoice: settings.brandVoice,
         targetAudience: settings.targetAudience,
@@ -567,25 +570,37 @@ REQUIREMENTS:
     result?: GeneratedContent,
     error?: string
   ): Promise<void> {
-    const jobData = await this.redis.get(`batch_job:${batchJobId}`);
-    if (!jobData) return;
+    const job = await this.getBatchJobStatus(batchJobId);
+    if (!job) return;
 
-    const job: BatchGenerationJob = JSON.parse(jobData);
+    const taskIndex = job.results.findIndex(t => t.id === taskId);
+    if (taskIndex === -1) return;
 
-    // Update progress counters
-    if (taskStatus === 'processing') {
-      job.progress.processing += 1;
-      job.progress.currentStage = `Generating content (${job.progress.processing}/${job.progress.total})`;
-    } else if (taskStatus === 'completed') {
-      job.progress.processing = Math.max(0, job.progress.processing - 1);
-      job.progress.completed += 1;
-      
-      if (result) {
-        job.results.push(result);
-      }
-    } else if (taskStatus === 'failed') {
-      job.progress.processing = Math.max(0, job.progress.processing - 1);
-      job.progress.failed += 1;
+    const task = job.results[taskIndex];
+
+    switch (taskStatus) {
+      case 'processing':
+        job.progress.processing = (job.progress.processing || 0) + 1;
+        task.status = 'processing';
+        task.startedAt = new Date();
+        break;
+      case 'completed':
+        job.progress.completed++;
+        if (job.progress.processing) job.progress.processing--;
+        task.status = 'completed';
+        task.completedAt = new Date();
+        if (result) {
+          // Assign the generated content to the task's result
+          task.result = result;
+        }
+        break;
+      case 'failed':
+        job.progress.failed++;
+        if (job.progress.processing) job.progress.processing--;
+        task.status = 'failed';
+        task.completedAt = new Date();
+        task.error = error;
+        break;
     }
 
     // Update percentage and status

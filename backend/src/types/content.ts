@@ -54,6 +54,7 @@ export interface ContentMetadata {
   safetyRatings?: any;
   responseTime?: number;
   taskId?: string;
+  promptType?: string;
 }
 
 export interface GeneratedContent {
