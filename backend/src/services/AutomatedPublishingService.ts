@@ -361,8 +361,10 @@ export class AutomatedPublishingService {
 
       // Update job progress
       const result: PublishingResult = {
-        success: true,
+        taskId: taskId,
         contentId,
+        targetId: 'wordpress',
+        success: true,
         wordpressId: publishResult.externalId,
         url: publishResult.externalUrl,
         publishedAt: publishResult.publishedAt || new Date(),
@@ -374,8 +376,10 @@ export class AutomatedPublishingService {
       return result;
     } catch (error) {
       const result: PublishingResult = {
-        success: false,
+        taskId: taskId,
         contentId,
+        targetId: 'wordpress',
+        success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
 

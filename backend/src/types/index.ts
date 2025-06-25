@@ -92,14 +92,31 @@ export enum ContentStatus {
 }
 
 export interface ContentMetadata {
-  keywords: string[];
+  keywords?: string[];
   seoTitle?: string;
   seoDescription?: string;
   featuredImage?: string;
-  wordCount: number;
-  readingTime: number;
+  wordCount?: number;
+  readingTime?: number;
   targetAudience?: string;
   brandVoice?: BrandVoiceConfig;
+  // Additional properties for services
+  seoScore?: number;
+  uniquenessScore?: number;
+  qualityScore?: number;
+  aiProvider?: string;
+  batchJobId?: string;
+  featuredImageSuggestion?: string;
+  finishReason?: string;
+  safetyRatings?: any;
+  selectedProvider?: string;
+  requestedProvider?: string;
+  selectionReason?: 'manual_selection' | 'intelligent_selection' | 'error_fallback' | 'primary_choice' | 'fallback_after_error';
+  originalError?: string;
+  responseTime?: number;
+  generatedAt?: string;
+  sourceUrls?: string[];
+  promptType?: string;
 }
 
 export interface BrandVoiceConfig {
@@ -211,6 +228,8 @@ export interface PublishResult {
   externalUrl?: string;
   message: string;
   publishedAt: Date;
+  // Additional properties
+  performanceTrackingEnabled?: boolean;
 }
 
 // Project types
@@ -349,12 +368,18 @@ export interface PublishingSettings {
   categories?: string[];
   tags?: string[];
   scheduledDate?: Date;
+  delayBetweenPosts?: number;
+  enablePerformanceTracking?: boolean;
+  autoOptimization?: boolean;
 }
 
 export interface GeneratedContent {
+  id?: string;
   title: string;
   body: string;
   excerpt?: string;
+  type?: ContentType | 'blog_post' | 'social_media' | 'email' | 'ad_copy';
+  status?: ContentStatus;
   metadata: ContentMetadata;
   qualityScore?: number;
   seoTitle?: string;
@@ -362,6 +387,10 @@ export interface GeneratedContent {
   keywords?: string[];
   wordCount?: number;
   aiProvider?: string;
+  generatedAt?: Date;
+  editHistory?: any[];
+  batchJobId?: string;
+  sourceResearch?: any;
   sourceReference?: {
     url: string;
     title: string;
@@ -388,9 +417,12 @@ export interface ScrapingResult {
     images: string[];
     wordCount: number;
     language: string;
+    url?: string;
   };
   qualityScore: number;
   scrapedAt: string;
+  // Additional properties
+  wordCount?: number;
 }
 
 // Batch processing types
@@ -419,4 +451,310 @@ export interface ContentWorkflowItem {
   errorMessage?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// Admin Review System Types
+export interface ReviewQueueItem {
+  id: string;
+  contentId?: string;
+  content?: GeneratedContent;
+  title?: string;
+  type?: ContentType;
+  qualityScore: QualityScore | number;
+  aiProvider?: string;
+  generatedAt?: Date;
+  status: 'pending' | 'approved' | 'rejected' | 'editing' | 'auto_approved';
+  sourceReference?: {
+    url: string;
+    title: string;
+  };
+  reviewedBy?: string;
+  reviewedAt?: Date;
+  adminNotes?: string;
+  qualityRating?: number;
+  lastEditedBy?: string;
+  lastEditedAt?: Date;
+  autoApproved?: boolean;
+  priority?: number;
+  estimatedReadTime?: number;
+  batchJobId?: string;
+  createdAt?: Date;
+  preview?: string;
+  metadata?: any;
+}
+
+export interface ReviewFilters {
+  status?: 'pending' | 'approved' | 'rejected' | string;
+  type?: ContentType;
+  qualityScoreMin?: number;
+  qualityScoreMax?: number;
+  aiProvider?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  batchJobId?: string;
+  priority?: number | 'low' | 'medium' | 'high' | string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ApprovalOptions {
+  approve?: boolean;
+  feedback?: string;
+  qualityScore?: number;
+  publishImmediately?: boolean;
+  // Additional options
+  notes?: string;
+  edits?: any;
+  qualityRating?: number;
+  autoPublish?: boolean;
+  publishSettings?: any;
+}
+
+export interface BulkApprovalOptions {
+  contentIds?: string[];
+  approve?: boolean;
+  feedback?: string;
+  publishImmediately?: boolean;
+  // Additional options
+  autoPublish?: boolean;
+  defaultQualityRating?: number;
+  adminNotes?: string;
+  concurrency?: number;
+  publishSettings?: any;
+}
+
+export interface ApprovalResult {
+  contentId: string;
+  success: boolean;
+  message?: string;
+  publishResult?: PublishResult;
+  // Additional fields
+  status?: string;
+  reviewedAt?: Date;
+  qualityRating?: number;
+  queuedForPublishing?: boolean;
+  reviewedBy?: string;
+  addedToTrainingDataset?: boolean;
+  regenerationQueued?: boolean;
+}
+
+export interface QualityScore {
+  overall?: number;
+  seo?: number;
+  readability?: number;
+  engagement?: number;
+  uniqueness?: number;
+  // Additional scoring details
+  details?: any;
+  calculatedAt?: Date;
+}
+
+export interface ReviewMetrics {
+  totalPending: number;
+  totalApproved: number;
+  totalRejected: number;
+  averageQualityScore: number;
+  approvalRate: number;
+  averageReviewTime: number;
+  // Additional metrics
+  totalItems?: number;
+  averageEstimatedReadTime?: number;
+  averageReadTime?: number;
+  priorityBreakdown?: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  priorityCounts?: any;
+  pendingReview?: number;
+  autoApproved?: number;
+  approved?: number;
+  rejected?: number;
+}
+
+// Automated Publishing Types
+export interface AutomatedPublishingJob {
+  id: string;
+  contentId?: string;
+  contentIds?: string[]; // For bulk publishing
+  targetId?: string;
+  scheduledDate?: Date;
+  status: 'scheduled' | 'processing' | 'completed' | 'failed' | 'pending' | 'partially_completed' | 'completed_with_errors';
+  retryCount?: number;
+  lastAttempt?: Date;
+  result?: PublishResult;
+  error?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  // Additional properties
+  settings?: any;
+  progress?: {
+    total: number;
+    published: number;
+    failed: number;
+    percentage?: number;
+    currentStage?: string;
+    estimatedTimeRemaining?: string;
+    processing?: number;
+  };
+  results?: PublishingResult[];
+  completedAt?: Date;
+  wpCredentials?: any;
+}
+
+export interface PublishingTask {
+  id: string;
+  batchId?: string;
+  contentId: string;
+  targetId: string;
+  scheduledDate?: Date;
+  priority: 'low' | 'medium' | 'high';
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  attempts: number;
+  maxAttempts: number;
+  result?: PublishResult;
+  error?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PublishingResult {
+  taskId: string;
+  contentId: string;
+  targetId: string;
+  success: boolean;
+  externalId?: string;
+  externalUrl?: string;
+  publishedAt?: Date;
+  error?: string;
+  metrics?: ContentPerformanceMetrics;
+  // Additional properties
+  wordpressId?: string;
+  url?: string;
+  message?: string;
+  performanceTrackingEnabled?: boolean;
+}
+
+export interface ContentPerformanceMetrics {
+  views?: number;
+  clicks?: number;
+  shares?: number;
+  comments?: number;
+  likes?: number;
+  engagement?: number;
+  reach?: number;
+  impressions?: number;
+  ctr?: number;
+  conversionRate?: number;
+  // Additional tracking fields
+  currentMetrics?: {
+    views?: number;
+    engagementRate?: number;
+    comments?: number;
+    shares?: number;
+    averageTimeOnPage?: number;
+  };
+  seoMetrics?: any;
+  lastTrackedAt?: Date;
+  trackingHistory?: any[];
+  qualityScore?: number;
+  contentId?: string;
+  wordpressId?: string;
+  // More additional fields
+  wpPostId?: string;
+  publishedUrl?: string;
+  publishedAt?: Date;
+  aiProvider?: string;
+  createdAt?: Date;
+  initialMetrics?: any;
+}
+
+// Batch Generation Types
+export interface BatchGenerationJob {
+  id: string;
+  projectId?: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'completed_with_errors';
+  progress: {
+    total: number;
+    completed: number;
+    failed: number;
+    processing?: number;
+    currentStage?: string;
+    percentage?: number;
+    estimatedTimeRemaining?: string;
+  };
+  settings: BatchGenerationSettings;
+  results: GenerationTask[];
+  createdAt: Date;
+  updatedAt?: Date;
+  completedAt?: Date;
+  researchJobId?: string;
+}
+
+export interface BatchGenerationSettings {
+  contentType: ContentType | 'blog_post';
+  targetAudience: string;
+  brandVoice: BrandVoiceConfig;
+  topics?: string[];
+  keywords?: string[];
+  requirements: {
+    wordCount?: string;
+    includeImages?: boolean;
+    includeHeadings?: boolean;
+    includeCTA?: boolean;
+    seoOptimized?: boolean;
+    uniquenessThreshold?: number;
+  };
+  aiProvider?: 'openai' | 'gemini' | 'auto';
+  targetCount?: number;
+}
+
+export interface GenerationTask {
+  id: string;
+  batchId?: string;
+  topic?: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  result?: GeneratedContent;
+  error?: string;
+  startedAt?: Date;
+  completedAt?: Date;
+  // Additional properties
+  crawledContent?: any;
+  settings?: any;
+  priority?: number;
+  batchJobId?: string;
+  taskId?: string;
+  createdAt?: Date;
+  // Content properties for direct access
+  title?: string;
+  body?: string;
+  excerpt?: string;
+  metadata?: ContentMetadata;
+}
+
+// Research Types
+export interface ResearchJob {
+  id: string;
+  query: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  results: ScrapedContent[] & {
+    crawledContent?: any[];
+  };
+  error?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ScrapedContent {
+  url: string;
+  title: string;
+  content: string;
+  summary: string;
+  keywords: string[];
+  scrapedAt: Date;
+  qualityScore: number;
+  // Additional properties
+  sourceUrl?: string;
+  crawledContent?: any;
 } 

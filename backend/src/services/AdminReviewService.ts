@@ -152,7 +152,7 @@ export class AdminReviewService {
   async approveContent(
     contentId: string,
     adminId: string,
-    options: ApprovalOptions = {}
+    options: ApprovalOptions = { approve: true }
   ): Promise<ApprovalResult> {
     try {
       const reviewItem = this.findReviewItemByContentId(contentId);
@@ -176,7 +176,7 @@ export class AdminReviewService {
       reviewItem.reviewedBy = adminId;
       reviewItem.reviewedAt = new Date();
       reviewItem.adminNotes = options.notes;
-      reviewItem.qualityRating = options.qualityRating || reviewItem.qualityScore.overall;
+      reviewItem.qualityRating = options.qualityRating || (typeof reviewItem.qualityScore === 'number' ? reviewItem.qualityScore : reviewItem.qualityScore.overall || 0);
       reviewItem.content = finalContent;
 
       // Add to fine-tuning dataset
@@ -191,6 +191,7 @@ export class AdminReviewService {
       return {
         success: true,
         contentId,
+        message: 'Content approved successfully',
         status: 'approved',
         reviewedBy: adminId,
         reviewedAt: reviewItem.reviewedAt,
@@ -266,6 +267,7 @@ export class AdminReviewService {
         const chunkPromises = chunk.map(async (contentId) => {
           try {
             const result = await this.approveContent(contentId, adminId, {
+              approve: true,
               autoPublish: options.autoPublish,
               qualityRating: options.defaultQualityRating || 4,
               notes: options.adminNotes
@@ -495,7 +497,7 @@ export class AdminReviewService {
     const rejected = items.filter(item => item.status === 'rejected').length;
     const autoApproved = items.filter(item => item.autoApproved).length;
 
-    const qualityScores = items.map(item => item.qualityScore.overall);
+    const qualityScores = items.map(item => typeof item.qualityScore === 'number' ? item.qualityScore : item.qualityScore.overall || 0);
     const averageQualityScore = qualityScores.length > 0 
       ? Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length)
       : 0;
@@ -507,15 +509,20 @@ export class AdminReviewService {
     };
 
     return {
+      totalPending: pending,
+      totalApproved: approved,
+      totalRejected: rejected,
+      averageQualityScore,
+      approvalRate: total > 0 ? Math.round((approved + autoApproved) / total * 100) : 0,
+      averageReviewTime: 0, // Mock value
       totalItems: total,
       pendingReview: pending,
       approved,
       rejected,
       autoApproved,
-      averageQualityScore,
       priorityCounts,
       averageReadTime: items.length > 0 
-        ? Math.round(items.reduce((sum, item) => sum + item.estimatedReadTime, 0) / items.length)
+        ? Math.round(items.reduce((sum, item) => sum + (item.estimatedReadTime || 0), 0) / items.length)
         : 0
     };
   }

@@ -584,13 +584,45 @@ export class WebScrapingService {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      if (!this.browser) {
-        await this.initializeBrowser();
+      if (this.browser) {
+        return true;
       }
+      await this.initializeBrowser();
       return this.browser !== null;
     } catch (error) {
-      logger.error('WebScrapingService health check failed:', error);
+      logger.error('Health check failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Get scraping job status (for API compatibility)
+   */
+  async getScrapingJobStatus(jobId: string): Promise<any> {
+    // This is a simple implementation for API compatibility
+    // In a real implementation, you'd track job statuses
+    return {
+      id: jobId,
+      status: 'completed',
+      progress: 100,
+      results: [],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+  }
+
+  /**
+   * Cleanup resources
+   */
+  async cleanup(): Promise<void> {
+    try {
+      if (this.browser) {
+        await this.browser.close();
+        this.browser = null;
+        logger.info('WebScrapingService cleanup completed');
+      }
+    } catch (error) {
+      logger.error('Error during cleanup:', error);
     }
   }
 } 

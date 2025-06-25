@@ -36,17 +36,50 @@ export interface ContentMetadata {
   tokensUsed: number;
   selectedProvider?: string;
   requestedProvider?: string;
-  selectionReason?: 'manual_selection' | 'intelligent_selection' | 'error_fallback';
+  selectionReason?: 'manual_selection' | 'intelligent_selection' | 'error_fallback' | 'primary_choice' | 'fallback_after_error';
   originalError?: string;
+  keywords?: string[];
+  seoTitle?: string;
+  seoDescription?: string;
+  featuredImage?: string;
+  readingTime?: number;
+  targetAudience?: string;
+  brandVoice?: BrandVoice;
+  uniquenessScore?: number;
+  qualityScore?: number;
+  aiProvider?: string;
+  batchJobId?: string;
+  featuredImageSuggestion?: string;
+  finishReason?: string;
+  safetyRatings?: any;
+  responseTime?: number;
+  taskId?: string;
 }
 
 export interface GeneratedContent {
-  id: string;
+  id?: string;
   title: string;
   body: string;
-  excerpt: string;
-  type: 'blog_post' | 'social_media' | 'email' | 'ad_copy';
+  excerpt?: string;
+  type?: 'blog_post' | 'social_media' | 'email' | 'ad_copy';
   metadata: ContentMetadata;
+  qualityScore?: number;
+  seoTitle?: string;
+  seoDescription?: string;
+  keywords?: string[];
+  wordCount?: number;
+  aiProvider?: string;
+  generatedAt?: Date;
+  editHistory?: any[];
+  batchJobId?: string;
+  sourceResearch?: any;
+  status?: string;
+  sourceReference?: {
+    url: string;
+    title: string;
+    usedAsReference: boolean;
+    rewriteStyle: 'similar' | 'improved' | 'different_angle' | 'expanded';
+  };
 }
 
 export interface ImprovementSuggestion {

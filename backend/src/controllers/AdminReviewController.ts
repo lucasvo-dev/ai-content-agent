@@ -84,7 +84,7 @@ export class AdminReviewController {
       publishSettings
     };
 
-    const result = await this.reviewService.approveContent(contentId, adminId, options);
+    const result = await this.reviewService.approveContent(contentId, adminId, { approve: true, ...options });
 
     res.json({
       success: true,
@@ -166,7 +166,7 @@ export class AdminReviewController {
         adminNotes,
         concurrency
       };
-      result = await this.reviewService.bulkApprove(contentIds, adminId, options);
+      result = await this.reviewService.bulkApprove(contentIds, adminId, { contentIds, approve: true, ...options });
     } else {
       // Bulk reject implementation would go here
       throw new AppError('Bulk reject not implemented yet', 501);

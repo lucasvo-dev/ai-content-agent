@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { WordPressSiteService } from '../services/WordPressSiteService';
 import { asyncHandler } from '../utils/asyncHandler';
+import { AuthenticatedRequest } from '../types';
 
 export class WordPressSiteController {
   private wpSiteService: WordPressSiteService;
@@ -13,22 +14,24 @@ export class WordPressSiteController {
    * Add a new WordPress site
    * POST /api/v1/wordpress-sites
    */
-  addSite = asyncHandler(async (req: Request, res: Response) => {
+  addSite = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: { message: 'Authentication required' }
       });
+      return;
     }
 
     const { name, siteUrl, username, applicationPassword } = req.body;
 
     if (!name || !siteUrl || !username || !applicationPassword) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: { message: 'All fields are required: name, siteUrl, username, applicationPassword' }
       });
+      return;
     }
 
     const site = await this.wpSiteService.addWordPressSite(userId, {
@@ -52,13 +55,14 @@ export class WordPressSiteController {
    * Get all WordPress sites for current user
    * GET /api/v1/wordpress-sites
    */
-  getUserSites = asyncHandler(async (req: Request, res: Response) => {
+  getUserSites = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: { message: 'Authentication required' }
       });
+      return;
     }
 
     const sites = await this.wpSiteService.getUserWordPressSites(userId);
@@ -82,25 +86,27 @@ export class WordPressSiteController {
    * Get a specific WordPress site
    * GET /api/v1/wordpress-sites/:siteId
    */
-  getSite = asyncHandler(async (req: Request, res: Response) => {
+  getSite = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { siteId } = req.params;
     const userId = req.user?.id;
 
     const site = await this.wpSiteService.getWordPressSite(siteId);
 
     if (!site) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'WordPress site not found' }
       });
+      return;
     }
 
     // Check ownership
     if (site.userId !== userId) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: { message: 'Access denied' }
       });
+      return;
     }
 
     // Remove sensitive information from response
@@ -116,7 +122,7 @@ export class WordPressSiteController {
    * Update WordPress site
    * PUT /api/v1/wordpress-sites/:siteId
    */
-  updateSite = asyncHandler(async (req: Request, res: Response) => {
+  updateSite = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { siteId } = req.params;
     const userId = req.user?.id;
     const updates = req.body;
@@ -124,18 +130,20 @@ export class WordPressSiteController {
     const existingSite = await this.wpSiteService.getWordPressSite(siteId);
 
     if (!existingSite) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'WordPress site not found' }
       });
+      return;
     }
 
     // Check ownership
     if (existingSite.userId !== userId) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: { message: 'Access denied' }
       });
+      return;
     }
 
     const updatedSite = await this.wpSiteService.updateWordPressSite(siteId, updates);
@@ -154,25 +162,27 @@ export class WordPressSiteController {
    * Delete WordPress site
    * DELETE /api/v1/wordpress-sites/:siteId
    */
-  deleteSite = asyncHandler(async (req: Request, res: Response) => {
+  deleteSite = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { siteId } = req.params;
     const userId = req.user?.id;
 
     const site = await this.wpSiteService.getWordPressSite(siteId);
 
     if (!site) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'WordPress site not found' }
       });
+      return;
     }
 
     // Check ownership
     if (site.userId !== userId) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: { message: 'Access denied' }
       });
+      return;
     }
 
     await this.wpSiteService.deleteWordPressSite(siteId);
@@ -187,14 +197,15 @@ export class WordPressSiteController {
    * Test WordPress connection
    * POST /api/v1/wordpress-sites/test-connection
    */
-  testConnection = asyncHandler(async (req: Request, res: Response) => {
+  testConnection = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { siteUrl, username, applicationPassword } = req.body;
 
     if (!siteUrl || !username || !applicationPassword) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: { message: 'siteUrl, username, and applicationPassword are required' }
       });
+      return;
     }
 
     const testResult = await this.wpSiteService.testWordPressConnection({
@@ -208,7 +219,7 @@ export class WordPressSiteController {
       success: testResult.success,
       data: testResult.siteInfo,
       message: testResult.success ? 'Connection successful' : 'Connection failed',
-      error: testResult.error ? { message: testResult.error } : undefined
+      error: testResult.success ? undefined : { message: testResult.error || 'Unknown error' }
     });
   });
 
@@ -216,25 +227,27 @@ export class WordPressSiteController {
    * Test specific WordPress site connection
    * POST /api/v1/wordpress-sites/:siteId/test
    */
-  testSiteConnection = asyncHandler(async (req: Request, res: Response) => {
+  testSiteConnection = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { siteId } = req.params;
     const userId = req.user?.id;
 
     const site = await this.wpSiteService.getWordPressSite(siteId);
 
     if (!site) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'WordPress site not found' }
       });
+      return;
     }
 
     // Check ownership
     if (site.userId !== userId) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: { message: 'Access denied' }
       });
+      return;
     }
 
     // Decrypt password and test connection
@@ -264,13 +277,14 @@ export class WordPressSiteController {
    * Test all user's WordPress sites
    * POST /api/v1/wordpress-sites/test-all
    */
-  testAllSites = asyncHandler(async (req: Request, res: Response) => {
+  testAllSites = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: { message: 'Authentication required' }
       });
+      return;
     }
 
     await this.wpSiteService.testAllUserSites(userId);
@@ -285,13 +299,14 @@ export class WordPressSiteController {
    * Get WordPress sites available for publishing
    * GET /api/v1/wordpress-sites/available-for-publishing
    */
-  getAvailableSites = asyncHandler(async (req: Request, res: Response) => {
+  getAvailableSites = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: { message: 'Authentication required' }
       });
+      return;
     }
 
     const availableSites = await this.wpSiteService.getAvailableSitesForPublishing(userId);
@@ -315,25 +330,27 @@ export class WordPressSiteController {
    * Get WordPress site categories and tags
    * GET /api/v1/wordpress-sites/:siteId/taxonomy
    */
-  getSiteTaxonomy = asyncHandler(async (req: Request, res: Response) => {
+  getSiteTaxonomy = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { siteId } = req.params;
     const userId = req.user?.id;
 
     const site = await this.wpSiteService.getWordPressSite(siteId);
 
     if (!site) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'WordPress site not found' }
       });
+      return;
     }
 
     // Check ownership
     if (site.userId !== userId) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: { message: 'Access denied' }
       });
+      return;
     }
 
     res.json({
@@ -354,13 +371,14 @@ export class WordPressSiteController {
    * Get WordPress sites statistics
    * GET /api/v1/wordpress-sites/stats
    */
-  getSitesStats = asyncHandler(async (req: Request, res: Response) => {
+  getSitesStats = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: { message: 'Authentication required' }
       });
+      return;
     }
 
     const sites = await this.wpSiteService.getUserWordPressSites(userId);
