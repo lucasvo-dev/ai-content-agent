@@ -4,10 +4,7 @@ import type {
   ContentGenerationRequest, 
   GeneratedContent, 
   AIModel, 
-  HealthStatus,
-  // Link-based content types
-  ContentWorkflowItem,
-  ScrapingResult 
+  HealthStatus
 } from '../types/api';
 
 // API Configuration
@@ -93,7 +90,7 @@ export const aiApi = {
 // Link-Based Content API endpoints
 export const linkContentApi = {
   // Test scrape single URL
-  testScrape: async (url: string): Promise<any> => {
+  testScrape: async (url: string): Promise<ApiResponse<{ title: string; content: string; wordCount: number; qualityScore: number }>> => {
     const response = await scrapingApi.post('/link-content/test-scrape', { url });
     
     // Debug response format
@@ -108,8 +105,8 @@ export const linkContentApi = {
   },
 
   // Health check
-  healthCheck: async (): Promise<any> => {
-    const response = await api.get<ApiResponse<any>>('/link-content/health');
+  healthCheck: async (): Promise<{ status: string; message: string }> => {
+    const response = await api.get<ApiResponse<{ status: string; message: string }>>('/link-content/health');
     if (!response.data.success) {
       throw new Error(response.data.error?.message || 'Health check failed');
     }

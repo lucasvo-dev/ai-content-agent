@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { 
   GlobeAltIcon, 
@@ -7,16 +7,10 @@ import {
   ClockIcon,
   TrashIcon,
   PlusIcon,
-  PlayIcon,
   CogIcon,
   SparklesIcon,
   EyeIcon,
   ArrowPathIcon,
-  LinkIcon,
-  Cog6ToothIcon,
-  DocumentTextIcon,
-  ExclamationTriangleIcon,
-  DocumentCheckIcon,
   ClipboardDocumentIcon
 } from '@heroicons/react/24/outline';
 
@@ -24,15 +18,9 @@ import { Button } from './ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Input } from './ui/Input';
 import { Label } from './ui/Label';
-import { Textarea } from './ui/Textarea';
 import { Badge } from './ui/Badge';
 import { Progress } from './ui/Progress';
 import { linkContentApi, aiApi } from '../services/api';
-import type { 
-  CreateBatchJobRequest, 
-  BatchJobStatus, 
-  ScrapingResult 
-} from '../types/api';
 
 // REDESIGNED: Simplified 3-step workflow based on UX best practices
 const WORKFLOW_STEPS = [
@@ -170,13 +158,7 @@ export function LinkContentWorkflow() {
     }
   };
 
-  // Helper function to update settings
-  const updateLLMSetting = (key: keyof LLMSettings, value: string) => {
-    setLlmSettings(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
+
 
   // REAL AI Integration - Call actual API like ContentGenerator
   const generateContentWithSettings = async (
@@ -444,7 +426,7 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
     try {
       await Promise.all(generationPromises);
       toast.success('All generation jobs have been processed!');
-    } catch (error) {
+    } catch {
       toast.error('An unexpected error occurred during batch generation.');
     } finally {
       setIsGenerating(false);
@@ -1280,7 +1262,7 @@ function GenerationStep({
         </div>
       ) : (
         <div className="space-y-4">
-          {generatedContent.map((content, index) => (
+          {generatedContent.map((content) => (
             <Card key={content.id}>
               <CardHeader>
                 <div className="flex items-center justify-between">

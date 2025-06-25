@@ -70,28 +70,18 @@ const ContentGenerator: React.FC = () => {
     generateMutation.mutate(request);
   };
 
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
   };
 
-  const handleBrandVoiceChange = (field: string, value: any) => {
+  const handleBrandVoiceChange = (field: string, value: string) => {
     setFormData(prev => ({
       ...prev,
       brandVoice: {
         ...prev.brandVoice,
-        [field]: value
-      }
-    }));
-  };
-
-  const handleRequirementsChange = (field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      requirements: {
-        ...prev.requirements,
         [field]: value
       }
     }));

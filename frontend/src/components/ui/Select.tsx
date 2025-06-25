@@ -72,7 +72,7 @@ const SelectTrigger: React.FC<SelectTriggerProps> = ({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [context?.isOpen]);
+  }, [context?.isOpen, context]);
 
   if (!context) return null;
 
@@ -193,11 +193,9 @@ const SelectItem: React.FC<SelectItemProps> = ({
 }) => {
   const context = React.useContext(SelectContext);
 
-  if (!context) return null;
-
   // Register this item in the context
   React.useEffect(() => {
-    if (context.setItems) {
+    if (context?.setItems) {
       const displayText = typeof children === 'string' ? children : children?.toString() || value;
       context.setItems(prev => {
         const newMap = new Map(prev);
@@ -205,7 +203,9 @@ const SelectItem: React.FC<SelectItemProps> = ({
         return newMap;
       });
     }
-  }, [value, children, context.setItems]);
+  }, [value, children, context?.setItems, context]);
+
+  if (!context) return null;
 
   const isSelected = context.value === value;
 

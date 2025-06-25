@@ -126,7 +126,7 @@ export const WordPressPublisher: React.FC<WordPressPublisherProps> = ({ classNam
           setShowSetupGuide(true);
         }
       }
-    } catch (error) {
+    } catch {
       setConnectionResult({
         success: false,
         message: 'Network error occurred during connection test',
@@ -172,7 +172,7 @@ export const WordPressPublisher: React.FC<WordPressPublisherProps> = ({ classNam
           message: data.error?.message || 'Publishing failed',
         });
       }
-    } catch (error) {
+    } catch {
       setPublishResult({
         success: false,
         message: 'Network error occurred during publishing',
