@@ -3,10 +3,7 @@
   "version": "1.0.0",
   "description": "Monorepo for AI Content Agent Frontend and Backend",
   "private": true,
-  "scripts": {
-    "postinstall": "echo 'Running postinstall for monorepo root'",
-    "build-all": "npm run build --workspace=frontend && npm run build --workspace=backend"
-  },
+  "scripts": {},
   "keywords": [
     "ai",
     "content",
