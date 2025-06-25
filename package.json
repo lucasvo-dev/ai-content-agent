@@ -1,27 +1,25 @@
 {
-  "name": "ai-content-agent-backend",
+  "name": "ai-content-agent-monorepo",
   "version": "1.0.0",
-  "description": "AI Content Agent Backend - NestJS API Server",
-  "main": "dist/main.js",
+  "description": "Monorepo for AI Content Agent Frontend and Backend",
+  "private": true,
   "scripts": {
-    "build": "npm run build:backend",
-    "build:backend": "cd backend && npm ci && npm run build:prod",
-    "start": "npm run start:backend",
-    "start:backend": "cd backend && npm start",
-    "dev": "cd backend && npm run dev",
-    "lint": "cd backend && npm run lint"
-  },
-  "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "postinstall": "echo 'Running postinstall for monorepo root'",
+    "build-all": "npm run build --workspace=frontend && npm run build --workspace=backend"
   },
   "keywords": [
     "ai",
     "content",
-    "nestjs",
-    "api",
-    "backend"
+    "automation",
+    "wordpress",
+    "facebook",
+    "marketing",
+    "monorepo"
   ],
-  "author": "Lucas",
-  "license": "MIT"
+  "author": "AI Content Agent Team",
+  "license": "MIT",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ]
 } 
