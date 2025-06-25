@@ -71,36 +71,6 @@ export interface AIModel {
   description?: string;
 }
 
-// Content Templates
-export interface ContentTemplate {
-  id: string;
-  name: string;
-  type: string;
-  description: string;
-  provider: string;
-  model: string;
-  structure?: {
-    sections: string[];
-    requiredElements: string[];
-  };
-  brandVoice?: BrandVoice;
-}
-
-// AI Stats
-export interface AIStats {
-  usage: {
-    totalGenerations: number;
-    totalTokens: number;
-    averageQualityScore: number;
-    costThisMonth: number;
-  };
-  performance: {
-    averageGenerationTime: number;
-    successRate: number;
-    topContentType: string;
-  };
-}
-
 // Health Check
 export interface HealthStatus {
   success: boolean;
@@ -126,47 +96,6 @@ export interface HealthStatus {
 } 
 
 // Link-Based Content System Types
-export interface CreateBatchJobRequest {
-  projectId: string;
-  urls: string[];
-  generateSettings?: {
-    contentType: 'blog_post' | 'social_media' | 'email';
-    brandVoice: BrandVoice;
-    targetAudience: string;
-    preferredProvider?: 'openai' | 'gemini' | 'auto';
-  };
-}
-
-export interface BatchJob {
-  id: string;
-  projectId: string;
-  status: 'pending' | 'crawling' | 'generating' | 'completed' | 'failed';
-  totalUrls: number;
-  processedUrls: number;
-  failedUrls: number;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  stats?: {
-    totalItems: number;
-    crawledItems: number;
-    generatedItems: number;
-    failedItems: number;
-    approvedItems: number;
-    averageQuality: number;
-  };
-}
-
-export interface BatchJobStatus {
-  job: BatchJob;
-  items: ContentWorkflowItem[];
-  errors: Array<{
-    url: string;
-    error: string;
-    phase: 'crawling' | 'generation';
-  }>;
-}
-
 export interface ContentWorkflowItem {
   id: string;
   batchJobId: string;
@@ -192,89 +121,6 @@ export interface ContentWorkflowItem {
   approvedBy?: string;
 }
 
-// WordPress Sites Management Types
-export interface WordPressSiteConfig {
-  name: string;
-  siteUrl: string;
-  username: string;
-  applicationPassword: string;
-  description?: string;
-  defaultSettings?: {
-    defaultStatus: 'draft' | 'publish' | 'private';
-    defaultCategory?: string;
-    defaultTags?: string[];
-    autoPublish?: boolean;
-  };
-}
-
-export interface WordPressSite {
-  id: string;
-  userId: string;
-  name: string;
-  siteUrl: string;
-  username: string;
-  description?: string;
-  status: 'active' | 'inactive' | 'error';
-  lastTested?: string;
-  lastPublished?: string;
-  isActive: boolean;
-  siteInfo?: {
-    title: string;
-    description: string;
-    url: string;
-    adminEmail: string;
-    timezone: string;
-    language: string;
-    version: string;
-    categories: Array<{
-      id: number;
-      name: string;
-      slug: string;
-    }>;
-    tags: Array<{
-      id: number;
-      name: string;
-      slug: string;
-    }>;
-  };
-  defaultSettings?: {
-    defaultStatus: 'draft' | 'publish' | 'private';
-    defaultCategory?: string;
-    defaultTags?: string[];
-    autoPublish?: boolean;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface TestConnectionRequest {
-  siteUrl: string;
-  username: string;
-  applicationPassword: string;
-}
-
-export interface TestConnectionResponse {
-  success: boolean;
-  message: string;
-  siteInfo?: {
-    title: string;
-    description: string;
-    url: string;
-    version: string;
-    categories: Array<{
-      id: number;
-      name: string;
-      slug: string;
-    }>;
-    tags: Array<{
-      id: number;
-      name: string;
-      slug: string;
-    }>;
-  };
-  error?: string;
-}
-
 // URL Scraping Test Types
 export interface ScrapingResult {
   success: boolean;
@@ -294,14 +140,4 @@ export interface ScrapingResult {
   error?: string;
   strategy: string;
   processingTime: number;
-}
-
-// Workflow UI Types
-export interface WorkflowStep {
-  id: string;
-  title: string;
-  description: string;
-  status: 'pending' | 'active' | 'completed' | 'error';
-  canEdit: boolean;
-  component: React.ComponentType<any>;
 } 
