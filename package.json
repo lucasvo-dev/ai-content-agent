@@ -1,42 +1,28 @@
 {
-  "name": "ai-content-agent",
+  "name": "ai-content-agent-backend",
   "version": "1.0.0",
-  "description": "AI Content Agent - Advanced Content Generation Platform",
-  "main": "index.js",
+  "description": "AI Content Agent Backend - NestJS API Server",
+  "main": "dist/main.js",
   "scripts": {
-    "build": "echo 'Frontend already built'",
-    "start": "npx serve frontend/dist -s -l $PORT",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:backend": "cd backend && npm run dev",
-    "build:frontend": "cd frontend && npm ci && npm run build",
+    "postinstall": "npm run build:backend",
+    "build": "npm run build:backend", 
     "build:backend": "cd backend && npm ci && npm run build",
-    "lint": "npm run lint:frontend && npm run lint:backend",
-    "lint:frontend": "cd frontend && npm run lint",
-    "lint:backend": "cd backend && npm run lint"
+    "start": "npm run start:backend",
+    "start:backend": "cd backend && npm start",
+    "dev": "cd backend && npm run dev",
+    "lint": "cd backend && npm run lint"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/your-username/ai-content-agent.git"
-  },
-  "keywords": [
-    "ai",
-    "content",
-    "generation",
-    "nestjs",
-    "react",
-    "typescript"
-  ],
-  "author": "Lucas",
-  "license": "MIT",
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
   },
-  "dependencies": {
-    "serve": "^14.2.3"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
-  }
+  "keywords": [
+    "ai",
+    "content",
+    "nestjs",
+    "api",
+    "backend"
+  ],
+  "author": "Lucas",
+  "license": "MIT"
 } 
