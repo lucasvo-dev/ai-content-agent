@@ -73,4 +73,42 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node dist/healthcheck.js || exit 1
 
 # Start production server
-CMD ["node", "dist/server.js"] 
+CMD ["node", "dist/server.js"]
+
+# Stage 1: Build the NestJS application
+FROM node:18-alpine AS build
+
+WORKDIR /app/backend
+
+# Copy backend package.json and package-lock.json
+COPY backend/package*.json ./
+
+# Install dependencies for backend
+RUN npm install
+
+# Copy the rest of the backend source code
+COPY backend/ ./
+
+# Build the backend
+RUN npm run build:prod
+
+# Stage 2: Create the production image
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy the build output from the build stage
+COPY --from=build /app/backend/dist ./dist
+
+# Copy production dependencies
+COPY --from=build /app/backend/package.json ./package.json
+COPY --from=build /app/backend/package-lock.json ./package-lock.json
+
+# Install only production dependencies
+RUN npm ci --omit=dev
+
+# Expose the port the app will run on
+EXPOSE 3001
+
+# Command to run the app
+CMD ["node", "dist/production-server.js"] 
