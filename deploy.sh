@@ -46,23 +46,40 @@ deploy_backend() {
     fi
 }
 
+# Function to check environment sync
+check_env_sync() {
+    echo -e "${YELLOW}⚠️  Important: Make sure environment variables are synced before deployment!${NC}"
+    echo "Run './sync-env.sh' first if you haven't already."
+    echo ""
+    read -p "Have you synced environment variables? (y/n): " env_choice
+    
+    if [[ $env_choice != "y" && $env_choice != "Y" ]]; then
+        echo -e "${BLUE}🔧 Running environment sync...${NC}"
+        ./sync-env.sh
+    fi
+}
+
 # Main deployment menu
 echo -e "${YELLOW}Select deployment option:${NC}"
 echo "1. Deploy Frontend only"
 echo "2. Deploy Backend only" 
 echo "3. Deploy Both (Frontend first, then Backend)"
-echo "4. Setup Dokku apps (run on server)"
+echo "4. Deploy with Environment Sync (Recommended)"
+echo "5. Setup Dokku apps (run on server)"
 
-read -p "Enter your choice (1-4): " choice
+read -p "Enter your choice (1-5): " choice
 
 case $choice in
     1)
+        check_env_sync
         deploy_frontend
         ;;
     2)
+        check_env_sync
         deploy_backend
         ;;
     3)
+        check_env_sync
         echo -e "${BLUE}🚀 Deploying both Frontend and Backend...${NC}"
         deploy_frontend
         if [ $? -eq 0 ]; then
@@ -70,6 +87,15 @@ case $choice in
         fi
         ;;
     4)
+        echo -e "${GREEN}🔄 Full Deployment with Environment Sync...${NC}"
+        ./sync-env.sh
+        echo -e "${BLUE}🚀 Deploying both Frontend and Backend...${NC}"
+        deploy_frontend
+        if [ $? -eq 0 ]; then
+            deploy_backend
+        fi
+        ;;
+    5)
         echo -e "${YELLOW}📋 Run these commands on your Dokku server (once):${NC}"
         echo ""
         echo "# Create apps (if not already created)"
@@ -96,7 +122,7 @@ case $choice in
         echo ""
         echo "# Set domains and enable Let's Encrypt (run on your Dokku server):"
         echo "dokku domains:set ai-content-agent-fe agent.guustudio.vn"
-        echo "dokku domains:set ai-content-agent-be be.agent.guustudio.vn"
+        echo "dokku domains:set ai-content-agent-be be-agent.guustudio.vn"
         echo "dokku letsencrypt:enable ai-content-agent-fe"
         echo "dokku letsencrypt:enable ai-content-agent-be"
         echo "dokku letsencrypt:set ai-content-agent-fe email votanlean@gmail.com"

@@ -30,6 +30,10 @@ COPY --from=build /app/package-lock.json ./package-lock.json
 # Install only production dependencies
 RUN npm ci --omit=dev
 
+# Install Playwright and browsers
+RUN npm install playwright@1.41.0
+RUN npx playwright install --with-deps chromium
+
 # Expose the port the app will run on
 EXPOSE 3001
 
