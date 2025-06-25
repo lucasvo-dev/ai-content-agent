@@ -3,16 +3,16 @@
 # Stage 1: Build the React application
 FROM node:18-alpine AS build
 
-WORKDIR /app/frontend
+WORKDIR /app
 
-# Copy frontend package.json and package-lock.json
-COPY frontend/package*.json ./
+# Copy package.json and package-lock.json
+COPY package*.json ./
 
 # Install dependencies for frontend
 RUN npm install
 
 # Copy the rest of the frontend source code
-COPY frontend/ ./
+COPY . ./
 
 # Build the frontend
 RUN npm run build
@@ -23,10 +23,10 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Copy the build output from the build stage
-COPY --from=build /app/frontend/dist ./dist
+COPY --from=build /app/dist ./dist
 
 # Copy package.json to install 'serve'
-COPY frontend/package.json ./package.json
+COPY package.json ./package.json
 RUN npm install --omit=dev && npm cache clean --force && mv node_modules /app/node_modules
 
 # Expose the port the app will run on
