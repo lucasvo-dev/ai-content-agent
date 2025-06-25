@@ -4,12 +4,11 @@
   "description": "AI Content Agent - Advanced Content Generation Platform",
   "main": "index.js",
   "scripts": {
-    "postinstall": "npm run build:frontend",
     "build": "npm run build:frontend",
     "build:frontend": "cd frontend && npm ci && npm run build",
-    "build:backend": "cd backend && npm ci && npm run build",
-    "start": "npm run start:frontend",
-    "start:frontend": "cd frontend && npm run preview -- --host 0.0.0.0 --port $PORT",
+    "build:backend": "cd backend && npm ci && npm run build", 
+    "start": "npm run serve:frontend",
+    "serve:frontend": "npx serve frontend/dist -s -l $PORT",
     "start:backend": "cd backend && npm start",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:frontend": "cd frontend && npm run dev",
@@ -35,6 +34,9 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "serve": "^14.2.3"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
