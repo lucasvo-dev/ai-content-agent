@@ -8,7 +8,10 @@ import type {
 } from '../types/api';
 
 // API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const isProduction = import.meta.env.PROD;
+const API_BASE_URL = isProduction 
+  ? 'https://be-agent.guustudio.vn' 
+  : (import.meta.env.VITE_API_URL || 'http://localhost:3001');
 
 // Cache-busting comment: 2025-06-25 18:08 UTC
 
