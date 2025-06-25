@@ -7,7 +7,7 @@
     "dev": "tsx watch --clear-screen=false src/dev-server.ts",
     "build": "echo 'TypeScript build skipped for deployment'",
     "build:prod": "echo 'TypeScript build skipped for deployment'",
-    "start": "npx ts-node src/server.ts",
+    "start": "npx ts-node -r tsconfig-paths/register src/server.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -67,6 +67,9 @@
     "rate-limiter-flexible": "^4.0.1",
     "readability": "^0.1.0",
     "sharp": "^0.32.6",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.3.2",
     "uuid": "^11.1.0",
     "winston": "^3.11.0"
   },
@@ -89,9 +92,7 @@
     "supertest": "^6.3.3",
     "ts-jest": "^29.1.1",
     "tsc-alias": "^1.8.16",
-    "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.6.0",
-    "typescript": "^5.3.2"
+    "tsx": "^4.6.0"
   },
   "engines": {
     "node": ">=18.0.0",
