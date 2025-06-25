@@ -4,8 +4,7 @@
   "description": "AI Content Agent Backend - NestJS API Server",
   "main": "dist/main.js",
   "scripts": {
-    "postinstall": "npm run build:backend",
-    "build": "npm run build:backend", 
+    "build": "npm run build:backend",
     "build:backend": "cd backend && npm ci && npm run build:prod",
     "start": "npm run start:backend",
     "start:backend": "cd backend && npm start",

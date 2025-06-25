@@ -14,16 +14,14 @@ NC='\033[0m' # No Color
 deploy_frontend() {
     echo -e "${BLUE}📱 Deploying Frontend to ai-content-agent-fe...${NC}"
     
-    # Ensure we have the right package.json for frontend
-    git add package.json Procfile .buildpacks
-    git commit -m "Add frontend deployment config"
+    # No need to move package.json or Procfile here anymore
     
     # Push to frontend remote
     git push dokku-fe main
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✅ Frontend deployed successfully!${NC}"
-        echo -e "${GREEN}🌐 Frontend URL: http://your-server-ip:ai-content-agent-fe-port${NC}"
+        echo -e "${GREEN}🌐 Frontend URL: https://agent.guustudio.vn${NC}"
     else
         echo -e "${RED}❌ Frontend deployment failed${NC}"
         return 1
@@ -34,35 +32,18 @@ deploy_frontend() {
 deploy_backend() {
     echo -e "${BLUE}🔧 Deploying Backend to ai-content-agent-be...${NC}"
     
-    # Switch to backend package.json
-    mv package.json package-frontend.json
-    mv backend-package.json package.json
-    
-    # Create Procfile for backend
-    echo "web: npm start" > Procfile
-    
-    # Commit backend config
-    git add package.json Procfile
-    git commit -m "Add backend deployment config"
+    # No need to move package.json or create Procfile here anymore
     
     # Push to backend remote
     git push dokku-be main
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✅ Backend deployed successfully!${NC}"
-        echo -e "${GREEN}🔗 Backend URL: http://your-server-ip:ai-content-agent-be-port${NC}"
+        echo -e "${GREEN}🔗 Backend URL: https://be.agent.guustudio.vn${NC}"
     else
         echo -e "${RED}❌ Backend deployment failed${NC}"
-        # Restore frontend config
-        mv package.json backend-package.json
-        mv package-frontend.json package.json
         return 1
     fi
-    
-    # Restore frontend config
-    mv package.json backend-package.json
-    mv package-frontend.json package.json
-    echo "web: npm start" > Procfile
 }
 
 # Main deployment menu
@@ -89,15 +70,19 @@ case $choice in
         fi
         ;;
     4)
-        echo -e "${YELLOW}📋 Run these commands on your Dokku server:${NC}"
+        echo -e "${YELLOW}📋 Run these commands on your Dokku server (once):${NC}"
         echo ""
-        echo "# Create apps"
+        echo "# Create apps (if not already created)"
         echo "dokku apps:create ai-content-agent-fe"
         echo "dokku apps:create ai-content-agent-be"
         echo ""
-        echo "# Add git remotes (run on your local machine):"
-        echo "git remote add dokku-fe dokku@your-server-ip:ai-content-agent-fe"
-        echo "git remote add dokku-be dokku@your-server-ip:ai-content-agent-be"
+        echo "# Set build directories for monorepo (IMPORTANT!)"
+        echo "dokku git:set ai-content-agent-fe build-dir frontend"
+        echo "dokku git:set ai-content-agent-be build-dir backend"
+        echo ""
+        echo "# Add git remotes (run on your local machine if not already added):"
+        echo "git remote add dokku-fe dokku@116.118.51.71:ai-content-agent-fe"
+        echo "git remote add dokku-be dokku@116.118.51.71:ai-content-agent-be"
         echo ""
         echo "# Set environment variables for backend:"
         echo "dokku config:set ai-content-agent-be NODE_ENV=production"
@@ -105,9 +90,17 @@ case $choice in
         echo "dokku config:set ai-content-agent-be OPENAI_API_KEY=your-openai-key"
         echo "dokku config:set ai-content-agent-be GOOGLE_AI_API_KEY=your-gemini-key"
         echo ""
-        echo "# Set ports"
-        echo "dokku proxy:ports-set ai-content-agent-fe http:80:5173"
-        echo "dokku proxy:ports-set ai-content-agent-be http:80:3001"
+        echo "# Set ports for proxy (frontend typically 5173, backend 3001)"
+        echo "dokku proxy:ports-set ai-content-agent-fe http:80:5173 https:443:5173"
+        echo "dokku proxy:ports-set ai-content-agent-be http:80:3001 https:443:3001"
+        echo ""
+        echo "# Set domains and enable Let's Encrypt (run on your Dokku server):"
+        echo "dokku domains:set ai-content-agent-fe agent.guustudio.vn"
+        echo "dokku domains:set ai-content-agent-be be.agent.guustudio.vn"
+        echo "dokku letsencrypt:enable ai-content-agent-fe"
+        echo "dokku letsencrypt:enable ai-content-agent-be"
+        echo "dokku letsencrypt:set ai-content-agent-fe email votanlean@gmail.com"
+        echo "dokku letsencrypt:set ai-content-agent-be email votanlean@gmail.com"
         ;;
     *)
         echo -e "${RED}❌ Invalid choice${NC}"
