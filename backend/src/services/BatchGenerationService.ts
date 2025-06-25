@@ -589,10 +589,10 @@ REQUIREMENTS:
         if (job.progress.processing) job.progress.processing--;
         task.status = 'completed';
         task.completedAt = new Date();
-        if (result) {
+      if (result) {
           // Assign the generated content to the task's result
           task.result = result;
-        }
+      }
         break;
       case 'failed':
         job.progress.failed++;
