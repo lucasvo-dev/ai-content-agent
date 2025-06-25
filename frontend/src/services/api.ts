@@ -10,6 +10,14 @@ import type {
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+// Cache-busting comment: 2025-06-25 18:08 UTC
+
+// Debug logging for environment variables
+console.log('🔧 API Configuration Debug:');
+console.log('  VITE_API_URL:', import.meta.env.VITE_API_URL);
+console.log('  API_BASE_URL:', API_BASE_URL);
+console.log('  Environment:', import.meta.env.MODE);
+
 const api = axios.create({
   baseURL: `${API_BASE_URL}/api/v1`,
   timeout: 30000, // 30 seconds for regular API calls
@@ -113,5 +121,37 @@ export const linkContentApi = {
     return response.data.data!;
   }
 };
+
+// Debug function to test API connectivity
+export const debugApi = {
+  testConnection: async (): Promise<void> => {
+    console.log('🧪 Testing API Connection...');
+    console.log('  Base URL:', API_BASE_URL);
+    console.log('  Full Health URL:', `${API_BASE_URL}/api/v1/health`);
+    
+    try {
+      const response = await api.get('/health');
+      console.log('✅ API Connection Success:', response.data);
+    } catch (error) {
+      console.error('❌ API Connection Failed:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('  Error Details:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          baseURL: error.config?.baseURL
+        });
+      }
+    }
+  }
+};
+
+// Auto-test connection when module loads (in development)
+if (import.meta.env.MODE === 'development') {
+  setTimeout(() => {
+    debugApi.testConnection();
+  }, 2000);
+}
 
 export default api; 
