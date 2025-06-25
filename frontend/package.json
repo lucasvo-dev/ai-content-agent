@@ -10,6 +10,7 @@
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
+    "start": "serve -s dist -l $PORT",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "type-check": "tsc --noEmit"
@@ -32,6 +33,7 @@
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
     "react-textarea-autosize": "^8.5.3",
+    "serve": "^14.2.1",
     "tailwind-merge": "^2.0.0"
   },
   "devDependencies": {
