@@ -1,0 +1,28 @@
+{
+  "name": "ai-content-agent-backend",
+  "version": "1.0.0",
+  "description": "AI Content Agent Backend - NestJS API Server",
+  "main": "dist/main.js",
+  "scripts": {
+    "postinstall": "npm run build:backend",
+    "build": "npm run build:backend", 
+    "build:backend": "cd backend && npm ci && npm run build",
+    "start": "npm run start:backend",
+    "start:backend": "cd backend && npm start",
+    "dev": "cd backend && npm run dev",
+    "lint": "cd backend && npm run lint"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "ai",
+    "content",
+    "nestjs",
+    "api",
+    "backend"
+  ],
+  "author": "Lucas",
+  "license": "MIT"
+} 
