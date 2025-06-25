@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 // Import routes
 import healthRoutes from "./routes/health";
 import aiRoutes from "./routes/ai";
+import linkContentRoutes from "./routes/link-content";
 
 console.log('🔧 Loading environment variables...');
 dotenv.config();
@@ -73,6 +74,9 @@ app.use("/api/v1/health", healthRoutes);
 // AI routes (with built-in auth where needed)
 app.use("/api/v1/ai", aiRoutes);
 
+// Link-based content routes
+app.use("/api/v1/link-content", linkContentRoutes);
+
 // Basic test endpoint
 app.get('/api/v1/test', (req, res) => {
   console.log('📞 Test endpoint called');
@@ -90,7 +94,9 @@ app.get('/api/v1/test', (req, res) => {
       'POST /api/v1/ai/generate',
       'POST /api/v1/ai/analyze/:contentId',
       'GET /api/v1/ai/stats',
-      'POST /api/v1/ai/regenerate/:contentId'
+      'POST /api/v1/ai/regenerate/:contentId',
+      'GET /api/v1/link-content/health',
+      'POST /api/v1/link-content/test-scrape'
     ]
   });
 });
@@ -104,7 +110,8 @@ app.use("*", (req, res) => {
     availableRoutes: [
       '/api/v1/health',
       '/api/v1/test',
-      '/api/v1/ai/*'
+      '/api/v1/ai/*',
+      '/api/v1/link-content/*'
     ]
   });
 });
