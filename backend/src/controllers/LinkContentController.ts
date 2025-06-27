@@ -634,13 +634,13 @@ export class LinkContentController {
     try {
       // Convert frontend format to EnhancedContentRequest format
       const request = {
-        type: settings.contentType === 'wordpress_blog' ? 'blog_post' : 'social_media',
+        type: (settings.contentType === 'wordpress_blog' ? 'blog_post' : 'social_media') as 'blog_post' | 'social_media',
         topic: sourceContent.title || 'Content Topic',
         context: sourceContent.content,
         targetAudience: settings.targetAudience || 'General audience',
         keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],
         brandVoice: {
-          tone: settings.tone || 'professional',
+          tone: (settings.tone || 'professional') as 'professional' | 'casual' | 'friendly' | 'authoritative',
           style: 'conversational',
           vocabulary: 'advanced',
           length: 'comprehensive',

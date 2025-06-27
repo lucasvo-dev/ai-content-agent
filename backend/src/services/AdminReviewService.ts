@@ -501,4 +501,27 @@ export class AdminReviewService {
     }
     return chunks;
   }
+
+  // Temporarily comment out problematic methods for deployment
+  /*
+  async getReviewQueue(options: ReviewQueueOptions = {}): Promise<ReviewQueue> {
+    // Implementation will be added later
+    return { items: [], totalCount: 0 };
+  }
+
+  async bulkApprove(contentIds: string[]): Promise<BulkOperationResult> {
+    // Implementation will be added later
+    return { success: true, processed: 0, failed: 0 };
+  }
+
+  async editContent(contentId: string, edits: any): Promise<Content> {
+    // Implementation will be added later
+    return {} as Content;
+  }
+
+  async getReviewStatistics(): Promise<ReviewStatistics> {
+    // Implementation will be added later
+    return {} as ReviewStatistics;
+  }
+  */
 } 
