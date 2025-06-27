@@ -6,6 +6,8 @@ import express from "express";
 import cors from "cors";
 import { HybridAIService } from './services/HybridAIService.js';
 import { LinkContentController } from './controllers/LinkContentController.js';
+import { WordPressMultiSiteController } from './controllers/WordPressMultiSiteController.js';
+import { PhotoGalleryService } from './services/PhotoGalleryService.js';
 import type { ContentGenerationRequest } from './types/content.js';
 
 const app = express();
@@ -21,7 +23,10 @@ app.use(express.json());
 
 // Initialize services
 const aiService = new HybridAIService();
+// Use real PhotoGalleryService configuration (defaults to PHOTO_GALLERY_API_URL env)
+const photoGalleryService = new PhotoGalleryService();
 const linkContentController = new LinkContentController();
+const wordpressMultiSiteController = new WordPressMultiSiteController();
 
 // Health check endpoint
 app.get('/api/v1/health', (req, res) => {
@@ -196,6 +201,85 @@ app.get('/api/v1/link-content/batch/:jobId/approved', linkContentController.getA
 app.post('/api/v1/link-content/test-scrape', linkContentController.testScrape);
 app.get('/api/v1/link-content/health', linkContentController.healthCheck);
 
+// Enhanced content generation endpoint
+app.post('/api/v1/link-content/generate-enhanced', async (req, res) => {
+  try {
+    console.log('🎯 Enhanced content generation request:', req.body);
+    
+    // Frontend sends { request: {...} }, so we need to extract the request
+    const requestData = req.body.request || req.body;
+    
+    // Transform request to match HybridAIService expectations
+    const transformedRequest = {
+      type: requestData.type || 'blog_post',
+      topic: requestData.topic,
+      targetAudience: requestData.targetAudience,
+      keywords: requestData.keywords || [],
+      brandVoice: requestData.brandVoice || {
+        tone: requestData.tone || 'professional',
+        style: 'conversational',
+        vocabulary: 'industry-specific',
+        length: 'detailed'
+      },
+      context: requestData.context,
+      preferredProvider: requestData.preferredProvider || 'auto',
+      imageSettings: requestData.imageSettings
+    };
+    
+    console.log('🔄 Transformed request:', JSON.stringify(transformedRequest, null, 2));
+    
+    // Call AI service with transformed request
+    const content = await aiService.generateContent(transformedRequest);
+    
+    // Enhanced: Process and insert images if requested
+    let finalContent = content;
+    if (requestData.imageSettings?.includeImages) {
+      try {
+        console.log('🖼️ Processing images for enhanced content...');
+        finalContent = await insertImagesIntoContent(content, requestData.imageSettings);
+      } catch (imageError) {
+        console.warn('⚠️ Image processing failed, proceeding without images:', imageError);
+        // Don't fail the entire generation, just proceed without images
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: finalContent,
+      enhanced: true,
+      withImages: !!(requestData.imageSettings?.includeImages),
+      message: 'Enhanced content generated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Enhanced content generation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Enhanced content generation failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }
+    });
+  }
+});
+
+// Image Gallery endpoints (delegate to LinkContentController for real data)
+app.get('/api/v1/link-content/image-categories', linkContentController.getImageCategories);
+app.get('/api/v1/link-content/image-folders/:categorySlug', linkContentController.getImageFolders);
+app.get('/api/v1/link-content/preview-images', linkContentController.previewImages);
+
+// WordPress Multi-Site endpoints
+app.get('/api/v1/wordpress-multisite/sites', wordpressMultiSiteController.getSites);
+app.get('/api/v1/wordpress-multisite/sites/:siteId', wordpressMultiSiteController.getSite);
+app.put('/api/v1/wordpress-multisite/sites/:siteId', wordpressMultiSiteController.updateSiteConfig);
+app.post('/api/v1/wordpress-multisite/test-connections', wordpressMultiSiteController.testConnections);
+app.post('/api/v1/wordpress-multisite/smart-publish', wordpressMultiSiteController.smartPublish);
+app.post('/api/v1/wordpress-multisite/cross-post', wordpressMultiSiteController.crossPost);
+app.post('/api/v1/wordpress-multisite/preview-routing', wordpressMultiSiteController.previewRouting);
+app.get('/api/v1/wordpress-multisite/stats', wordpressMultiSiteController.getPublishingStats);
+app.get('/api/v1/wordpress-multisite/routing-rules', wordpressMultiSiteController.getRoutingRules);
+app.post('/api/v1/wordpress-multisite/bulk', wordpressMultiSiteController.bulkOperations);
+app.get('/api/v1/wordpress-multisite/health', wordpressMultiSiteController.healthCheck);
+
 // WordPress sites endpoints - Mock data for development
 app.get('/api/v1/wordpress-sites/available-for-publishing', (req, res) => {
   res.json({
@@ -221,6 +305,91 @@ app.get('/api/v1/wordpress-sites/available-for-publishing', (req, res) => {
     message: 'Mock WordPress sites for development'
   });
 });
+
+/**
+ * Enhanced function to insert images into generated content using placeholders
+ */
+async function insertImagesIntoContent(content: any, imageSettings: any): Promise<any> {
+  try {
+    const placeholder = '[INSERT_IMAGE]';
+    const body: string = content.body || '';
+
+    // 1. Count placeholders to determine how many images are needed
+    const requiredImages = (body.match(new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g')) || []).length;
+    
+    if (requiredImages === 0) {
+      console.log('✅ No image placeholders found. Skipping image insertion.');
+      return content;
+    }
+
+    console.log(`🖼️ Found ${requiredImages} image placeholders. Fetching images...`);
+
+    // 2. Fetch images using the PhotoGalleryService
+    let selectedImages: string[] = [];
+    if (imageSettings.imageSelection === 'specific-folder' && imageSettings.specificFolder) {
+      selectedImages = await photoGalleryService.getImagesFromFolder(imageSettings.specificFolder, requiredImages);
+    } else if (imageSettings.imageSelection === 'auto-category' && imageSettings.imageCategory) {
+      selectedImages = await photoGalleryService.getImagesByCategory(imageSettings.imageCategory, requiredImages);
+    } else {
+      selectedImages = await photoGalleryService.getRandomImages(requiredImages);
+    }
+
+    if (selectedImages.length === 0) {
+      console.warn('⚠️ Could not fetch any images. Proceeding without them.');
+      // Remove placeholders if no images are found
+      const finalBody = body.replace(new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g'), '');
+      return { ...content, body: finalBody };
+    }
+    
+    console.log(`📸 Fetched ${selectedImages.length} images. Starting replacement...`);
+
+    // 3. Replace each placeholder with an image tag
+    let enhancedBody = body;
+    let imageIndex = 0;
+    
+    // Use a function with replace to handle multiple occurrences
+    enhancedBody = enhancedBody.replace(new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g'), () => {
+      if (imageIndex < selectedImages.length) {
+        const imageUrl = selectedImages[imageIndex];
+        imageIndex++;
+        // Derive fallback original image URL if thumbnail fails
+        const fallbackUrl = imageUrl.includes('get_thumbnail')
+          ? imageUrl.replace('get_thumbnail', 'get_image').replace(/&size=\d+/i, '')
+          : imageUrl;
+
+        const onLoadCheck = `if(this.naturalWidth<500){this.src='${fallbackUrl}';}`;
+
+        const imageHtml = `
+
+<figure class="wp-block-image size-large" style="text-align:center">
+  <img src="${imageUrl}" alt="${content.title || 'Content Image'}" style="max-width:750px;height:auto" onerror="this.onerror=null;this.src='${fallbackUrl}';this.style.maxWidth='750px';" onload="${onLoadCheck}" />
+  <figcaption>Illustration for ${content.title || 'this content'}</figcaption>
+</figure>
+
+`;
+        return imageHtml;
+      }
+      // If we run out of images for some reason, return an empty string
+      return ''; 
+    });
+
+    console.log(`✅ Successfully inserted ${imageIndex} images into the content.`);
+
+    return {
+      ...content,
+      body: enhancedBody,
+      metadata: {
+        ...content.metadata,
+        imagesInserted: imageIndex,
+        imageUrls: selectedImages.slice(0, imageIndex)
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ Image insertion failed:', error);
+    return content; // Return original content on failure
+  }
+}
 
 // Start server
 app.listen(PORT, () => {

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { WebScrapingService } from './WebScrapingService';
 import { HybridAIService } from './HybridAIService';
+import { EnhancedContentService } from './EnhancedContentService';
 import { logger } from '../utils/logger';
 import { ContentType, ContentStatus } from '../types';
 import type { 
@@ -20,6 +21,14 @@ export interface CreateBatchJobRequest {
     brandVoice: BrandVoiceConfig;
     targetAudience: string;
     preferredProvider?: 'openai' | 'gemini' | 'auto';
+    imageSettings?: {
+      includeImages: boolean;
+      imageSelection: 'auto-category' | 'specific-folder' | 'manual';
+      imageCategory?: string;
+      specificFolder?: string;
+      maxImages: number;
+      ensureConsistency: boolean;
+    };
   };
 }
 
@@ -45,12 +54,14 @@ export interface BatchJobStatus {
 export class LinkBasedContentService {
   private webScrapingService: WebScrapingService;
   private aiService: HybridAIService;
+  private enhancedContentService: EnhancedContentService;
   private batchJobs: Map<string, BatchJob> = new Map();
   private workflowItems: Map<string, ContentWorkflowItem[]> = new Map();
 
   constructor() {
     this.webScrapingService = new WebScrapingService();
     this.aiService = new HybridAIService();
+    this.enhancedContentService = new EnhancedContentService();
   }
 
   /**

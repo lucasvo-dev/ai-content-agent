@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { WordPressError } from '@/utils/errors';
 import type { Content, PublishResult, PlatformCredentials } from '@/types';
+import { logger } from '../utils/logger';
 
 interface WordPressCredentials extends PlatformCredentials {
   siteUrl: string;
@@ -436,6 +437,48 @@ export class WordPressService {
       throw new Error(`Failed to upload image. Status: ${uploadResponse.status}`);
     } catch (error) {
       throw new WordPressError('Failed to upload featured image', error);
+    }
+  }
+
+  /**
+   * Upload image buffer to WordPress media library
+   */
+  async uploadImageToWordPress(
+    imageBuffer: Buffer, 
+    filename: string, 
+    altText: string, 
+    caption?: string
+  ): Promise<{ id: number; url: string; }> {
+    try {
+      // Upload to WordPress
+      const uploadResponse = await this.client.post('/media', imageBuffer, {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        },
+      });
+
+      if (uploadResponse.status === 201) {
+        const mediaId = uploadResponse.data.id;
+        const mediaUrl = uploadResponse.data.source_url;
+
+        // Update media metadata
+        await this.client.put(`/media/${mediaId}`, {
+          alt_text: altText,
+          caption: caption || altText,
+        });
+
+        logger.info(`Uploaded image to WordPress: ${filename} (ID: ${mediaId})`);
+
+        return {
+          id: mediaId,
+          url: mediaUrl
+        };
+      }
+
+      throw new Error(`Failed to upload image. Status: ${uploadResponse.status}`);
+    } catch (error) {
+      throw new WordPressError('Failed to upload image to WordPress', error);
     }
   }
 

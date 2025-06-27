@@ -311,218 +311,151 @@ export class HybridAIService {
   }
 
   private async generateWithOpenAI(request: ContentGenerationRequest): Promise<GeneratedContent> {
-    console.log('🔵 Using OpenAI GPT-4 Turbo...');
+    if (!this.openai) {
+      throw new Error('OpenAI client not initialized');
+    }
 
     const prompt = this.buildPrompt(request);
-    const isDetailedPrompt = request.context && request.context.includes('### CRITICAL RULES');
     
-    try {
-      const completionParams: any = {
-        model: 'gpt-4-turbo-preview',
-        messages: [
-          {
-            role: 'system',
-            content: isDetailedPrompt 
-              ? 'You are an expert content creator. Follow the detailed instructions provided exactly. Return the content in the format specified in the prompt.'
-              : 'You are an expert content creator specializing in high-quality, engaging content that converts. Always return valid JSON with the specified structure. Focus on creating valuable, actionable content that resonates with the target audience.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: isDetailedPrompt ? 4000 : 2000, // More tokens for detailed content
-        presence_penalty: 0.1,
-        frequency_penalty: 0.1
-      };
-
-      // Only add JSON format requirement for basic prompts
-      if (!isDetailedPrompt) {
-        completionParams.response_format = { type: 'json_object' };
-      }
-
-      // Add timeout to prevent hanging requests
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('OpenAI request timeout after 120 seconds')), 120000);
-      });
-
-      const completion = await Promise.race([
-        this.openai!.chat.completions.create(completionParams),
-        timeoutPromise
-      ]) as any;
-
-      const responseContent = completion.choices[0]?.message?.content;
-      if (!responseContent) {
-        throw new Error('No content generated from OpenAI');
-      }
-
-      let parsedContent;
-      
-      if (isDetailedPrompt) {
-        // For detailed prompts, parse as natural text content
-        console.log('📝 Processing natural text output from detailed prompt');
-        parsedContent = this.parseNaturalTextContent(responseContent, request);
-      } else {
-        // For basic prompts, expect JSON format
-      try {
-        parsedContent = JSON.parse(responseContent);
-      } catch (parseError) {
-        console.warn('❌ OpenAI JSON parsing failed, using text fallback');
-        parsedContent = this.parseTextContent(responseContent, request.type);
-        }
-      }
-      
-      return {
-        id: `openai-${Date.now()}`,
-        title: parsedContent.title,
-        body: parsedContent.body,
-        excerpt: parsedContent.excerpt || this.generateExcerpt(parsedContent.body),
-        type: request.type,
-        metadata: {
-          provider: 'openai',
-          aiModel: 'gpt-4-turbo-preview',
-          cost: this.calculateOpenAICost(completion.usage?.total_tokens || 0),
-          generatedAt: new Date().toISOString(),
-          wordCount: this.countWords(parsedContent.body),
-          seoScore: this.calculateSEOScore(parsedContent.body, request.keywords),
-          readabilityScore: this.calculateReadabilityScore(parsedContent.body),
-          engagementScore: this.calculateEngagementScore(parsedContent.body),
-          promptVersion: '1.0',
-          tokensUsed: completion.usage?.total_tokens || 0,
-          finishReason: completion.choices[0]?.finish_reason,
-          promptType: isDetailedPrompt ? 'detailed_frontend' : 'basic_backend'
-        }
-      };
-    } catch (error) {
-      console.error('❌ OpenAI generation failed:', error);
-      throw new Error(`OpenAI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    const response = await this.openai.chat.completions.create({
+      model: 'gpt-4-turbo-preview', // Or a model of your choice
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: 4096,
+      top_p: 1.0,
+      frequency_penalty: 0.0,
+      presence_penalty: 0.0,
+    });
+    
+    const textContent = response.choices[0].message.content || '';
+    const wordCount = this.countWords(textContent);
+    
+    // The new prompt returns raw HTML/text, not JSON, so we just use the content directly.
+    return {
+      id: `openai-${Date.now()}`,
+      title: request.topic, // We can improve title generation later
+      body: textContent,
+      excerpt: this.generateExcerpt(textContent),
+      type: request.type,
+      metadata: {
+        provider: 'openai',
+        aiModel: response.model,
+        cost: this.calculateOpenAICost(response.usage?.total_tokens || 0),
+        generatedAt: new Date().toISOString(),
+        wordCount: wordCount,
+        seoScore: this.calculateSEOScore(textContent, request.keywords),
+        readabilityScore: this.calculateReadabilityScore(textContent),
+        engagementScore: this.calculateEngagementScore(textContent),
+        promptVersion: '2.0',
+        tokensUsed: response.usage?.total_tokens || 0,
+        safetyRatings: [],
+      },
+    };
   }
 
   private async generateWithGemini(request: ContentGenerationRequest): Promise<GeneratedContent> {
-    console.log('🟢 Using Google Gemini Flash...');
+    if (!this.gemini) {
+      throw new Error('Gemini client not initialized');
+    }
 
     const prompt = this.buildPrompt(request);
-    const isDetailedPrompt = request.context && request.context.includes('### CRITICAL RULES');
-    
-    try {
-      // Add timeout to prevent hanging requests
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Gemini request timeout after 45 seconds')), 45000);
-      });
 
-      const result = await Promise.race([
-        this.gemini.generateContent(prompt),
-        timeoutPromise
-      ]) as any;
-      const response = await result.response;
-      const text = response.text();
+    const result = await this.gemini.generateContent(prompt);
+    const response = await result.response;
+    const textContent = response.text();
+    const wordCount = this.countWords(textContent);
 
-      console.log('🔍 Gemini raw response:', text.substring(0, 200) + '...');
-
-      let parsedContent;
-      
-      if (isDetailedPrompt) {
-        // For detailed prompts, parse as natural text content
-        console.log('📝 Processing natural text output from detailed prompt');
-        parsedContent = this.parseNaturalTextContent(text, request);
-      } else {
-        // For basic prompts, expect JSON format
-      try {
-        // Remove markdown code blocks if present
-        let cleanText = text.replace(/```json\s*/g, '').replace(/\s*```/g, '').trim();
-        console.log('🧹 Cleaned text:', cleanText.substring(0, 200) + '...');
-        
-        // Find JSON object
-        const jsonStart = cleanText.indexOf('{');
-        const jsonEnd = cleanText.lastIndexOf('}');
-        
-        if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-          const jsonString = cleanText.substring(jsonStart, jsonEnd + 1);
-          console.log('📋 Extracted JSON:', jsonString.substring(0, 100) + '...');
-          
-          parsedContent = JSON.parse(jsonString);
-          console.log('✅ Successfully parsed JSON:', { 
-            title: parsedContent.title?.substring(0, 50), 
-            bodyLength: parsedContent.body?.length 
-          });
-        } else {
-          throw new Error('No valid JSON structure found');
-        }
-      } catch (parseError) {
-        console.warn('❌ Gemini JSON parsing failed:', parseError instanceof Error ? parseError.message : 'Unknown error');
-        console.log('🔄 Using text parsing fallback');
-        parsedContent = this.parseTextContent(text, request.type);
-        }
-      }
-
-      // Validate parsed content
-      if (!parsedContent.title || !parsedContent.body) {
-        console.warn('⚠️ Incomplete content from Gemini, using fallback');
-        parsedContent = this.parseTextContent(text, request.type);
-      }
-
-      return {
-        id: `gemini-${Date.now()}`,
-        title: parsedContent.title,
-        body: parsedContent.body,
-        excerpt: parsedContent.excerpt || this.generateExcerpt(parsedContent.body),
-        type: request.type,
-        metadata: {
-          provider: 'gemini',
-          aiModel: 'gemini-1.5-flash',
-          cost: 0, // Free!
-          generatedAt: new Date().toISOString(),
-          wordCount: this.countWords(parsedContent.body),
-          seoScore: this.calculateSEOScore(parsedContent.body, request.keywords),
-          readabilityScore: this.calculateReadabilityScore(parsedContent.body),
-          engagementScore: this.calculateEngagementScore(parsedContent.body),
-          promptVersion: '1.0',
-          tokensUsed: 0,
-          safetyRatings: result.response.candidates?.[0]?.safetyRatings || [],
-          promptType: isDetailedPrompt ? 'detailed_frontend' : 'basic_backend'
-        }
-      };
-    } catch (error) {
-      console.error('❌ Gemini generation failed:', error);
-      throw new Error(`Gemini generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return {
+      id: `gemini-${Date.now()}`,
+      title: request.topic, // We can improve title generation later
+      body: textContent,
+      excerpt: this.generateExcerpt(textContent),
+      type: request.type,
+      metadata: {
+        provider: 'gemini',
+        aiModel: 'gemini-1.5-flash',
+        cost: 0, // Gemini Flash is currently free
+        generatedAt: new Date().toISOString(),
+        wordCount: wordCount,
+        seoScore: this.calculateSEOScore(textContent, request.keywords),
+        readabilityScore: this.calculateReadabilityScore(textContent),
+        engagementScore: this.calculateEngagementScore(textContent),
+        promptVersion: '2.0',
+        tokensUsed: 0, // Placeholder
+        safetyRatings: response.candidates?.[0]?.safetyRatings || [],
+      },
+    };
   }
 
   private buildPrompt(request: ContentGenerationRequest): string {
-    // PRIORITY: If frontend provides detailed context/prompt, use it directly
-    if (request.context && request.context.includes('### CRITICAL RULES')) {
-      console.log('🎯 Using detailed frontend context/prompt');
-      return request.context;
+    const {
+      type,
+      topic,
+      context,
+      language = 'vietnamese',
+      brandVoice,
+      targetAudience,
+      keywords,
+      specialInstructions
+    } = request;
+
+    const brandName = brandVoice?.brandName || 'Your Brand';
+    const tone = brandVoice?.tone || 'professional';
+
+    if (type === 'blog_post') {
+      return `You are an expert content writer specializing in WordPress blog content. Your task is to transform the 'SOURCE ARTICLE' into high-quality WordPress-ready content.
+
+### CRITICAL RULES (Follow Strictly):
+1.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for WordPress editor. Use proper HTML tags. DO NOT include <html>, <head>, <body> tags.
+2.  **HTML STRUCTURE**: Use <h2> for main titles, <h3> for subsections, <p> for paragraphs, <strong> for bolding, and <ul>/<li> for lists.
+3.  **STRUCTURAL MIRRORING**: You MUST mirror the structure of the source article.
+4.  **LENGTH REQUIREMENT**: The final article MUST contain at least 1000 words. Expand on the source material with valuable insights, examples, and details.
+5.  **IMAGE PLACEMENT (CRITICAL)**: Strategically place the placeholder \`[INSERT_IMAGE]\` 3 to 5 times where an image would be most effective. Place it AFTER a paragraph.
+6.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
+7.  **CONTENT FIDELITY & REWRITING**: Base the content EXCLUSIVELY on the 'SOURCE ARTICLE' but rewrite every sentence.
+8.  **BRAND INTEGRATION**: If you find competitor brands, replace them with "${brandName}".
+9.  **AUDIENCE/TONE**: Write for "${targetAudience}" with a ${tone} tone.
+10. **KEYWORD INTEGRATION**: Weave these keywords naturally into the article: "${keywords?.join(', ')}".
+11. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
+
+### SOURCE ARTICLE TO TRANSFORM:
+---
+**Original Title:** ${topic}
+**Complete Source Content:**
+${context}
+---
+
+### OUTPUT REQUIREMENTS:
+Provide ONLY the final HTML content. Do not add any meta-commentary.`;
     }
 
-    // FALLBACK: Generate basic prompt only if no detailed context provided
-    console.log('📝 Using basic backend prompt generation');
-    const wordCountText = request.requirements?.wordCount || '500-800 words';
+    if (type === 'social_media') {
+      return `You are an expert social media manager. Your task is to transform the 'SOURCE ARTICLE' into a highly engaging Facebook post.
+
+### CRITICAL RULES (Follow Strictly):
+1.  **HOOK**: Start with a compelling question or a bold statement.
+2.  **READABILITY**: Use short paragraphs and relevant emojis (2-4).
+3.  **VALUE & CTA**: Summarize the key point and end with a Call-To-Action.
+4.  **HASHTAGS**: Include 3-5 relevant hashtags.
+5.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
+6.  **TONE**: Write for "${targetAudience}" with a ${tone} tone.
+7.  **BRAND REPLACEMENT**: Replace competitor brands with "${brandName}".
+8.  **KEYWORD INTEGRATION**: Naturally integrate these keywords: "${keywords?.join(', ')}".
+9. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
+
+### SOURCE ARTICLE TO TRANSFORM:
+---
+**Original Title:** ${topic}
+**Complete Source Content:**
+${context}
+---
+
+### OUTPUT REQUIREMENTS:
+Provide ONLY the final text for the Facebook post. Do not add any meta-commentary.`;
+    }
     
-    return `Write a ${request.type.replace('_', ' ')} about "${request.topic}" for ${request.targetAudience}.
-
-Style: ${request.brandVoice.tone}, ${request.brandVoice.style}, ${request.brandVoice.vocabulary} vocabulary
-Length: ${wordCountText}
-Keywords: ${request.keywords.join(', ')}
-${request.requirements?.includeHeadings ? 'Include headings. ' : ''}${request.requirements?.includeCTA ? 'Include call-to-action. ' : ''}
-
-WRITING RULES:
-- Short sentences (15 words max)
-- Simple words
-- Active voice
-- Short paragraphs (3-4 sentences)
-- Easy to read
-
-${request.context ? `Context: ${request.context}` : ''}
-
-Return ONLY valid JSON:
-{
-  "title": "Title here",
-  "body": "Content with \\n\\n for paragraphs. No HTML tags. Short sentences. Simple words.",
-  "excerpt": "Brief summary (150 chars max)"
-}`;
+    // Fallback for unknown types
+    return `Rewrite the following content: ${context}`;
   }
 
   private parseTextContent(text: string, type: string): any {

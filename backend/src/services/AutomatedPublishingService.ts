@@ -5,16 +5,19 @@ dotenv.config();
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { WordPressService } from './WordPressService.js';
+import { WordPressMultiSiteService, MultiSitePublishingRequest } from './WordPressMultiSiteService.js';
 import { AdminReviewService } from './AdminReviewService.js';
 import {
   AutomatedPublishingJob,
   PublishingTask,
-  PublishingResult,
+  PublishingResult as TypesPublishingResult,
   ContentPerformanceMetrics,
   WordPressCredentials,
   GeneratedContent,
   PublishingSettings
 } from '../types/index.js';
+import { logger } from '../utils/logger';
+import { v4 as uuidv4 } from 'uuid';
 
 interface PublishingJobData {
   jobId: string;
@@ -33,12 +36,56 @@ interface PublishingTaskData {
   delay: number;
 }
 
+export interface PublishingSchedule {
+  id: string;
+  contentId: string;
+  targetId: string; // WordPress site ID or social platform ID
+  platform: 'wordpress' | 'facebook' | 'twitter' | 'linkedin';
+  scheduledDate: Date;
+  status: 'scheduled' | 'published' | 'failed' | 'cancelled';
+  retryCount: number;
+  maxRetries: number;
+  publishedAt?: Date;
+  publishedUrl?: string;
+  errorMessage?: string;
+  createdAt: Date;
+}
+
+export interface PublishingTarget {
+  id: string;
+  platform: 'wordpress' | 'facebook' | 'twitter' | 'linkedin';
+  name: string;
+  credentials: {
+    [key: string]: any;
+  };
+  isActive: boolean;
+  lastUsed?: Date;
+  publishCount: number;
+  successRate: number;
+}
+
+export interface PublishingResult {
+  success: boolean;
+  scheduleId?: string;
+  contentId: string;
+  platform: string;
+  publishedUrl?: string;
+  publishedAt?: Date;
+  errorMessage?: string;
+  retryAfter?: Date;
+}
+
 export class AutomatedPublishingService {
   private redis: Redis;
   private publishingQueue: Queue;
   private performanceQueue: Queue;
   private adminReviewService: AdminReviewService;
   private isInitialized = false;
+  private wordPressService: WordPressService;
+  private wordPressMultiSiteService: WordPressMultiSiteService;
+  private publishingSchedules: Map<string, PublishingSchedule> = new Map();
+  private publishingTargets: Map<string, PublishingTarget> = new Map();
+  private publishingTimer: NodeJS.Timeout | null = null;
 
   // Performance tracking storage
   private performanceMetrics: Map<string, ContentPerformanceMetrics> = new Map();
@@ -75,7 +122,13 @@ export class AutomatedPublishingService {
     });
 
     this.adminReviewService = new AdminReviewService();
+    // this.wordPressService = new WordPressService();  // Will initialize later
+    this.wordPressMultiSiteService = new WordPressMultiSiteService();
     this.initializeWorkers();
+    this.initializeDefaultTargets();
+    this.startPublishingScheduler();
+    
+    logger.info('📢 AutomatedPublishingService initialized');
   }
 
   private async initializeWorkers(): Promise<void> {
@@ -714,5 +767,801 @@ export class AutomatedPublishingService {
         fineTuning: true,
       },
     };
+  }
+
+  /**
+   * Schedule content for publishing
+   */
+  async schedulePublishing(params: {
+    contentId: string;
+    targetId: string;
+    scheduledDate: Date;
+    platform?: 'wordpress' | 'facebook' | 'twitter' | 'linkedin';
+    maxRetries?: number;
+  }): Promise<string> {
+    const target = this.publishingTargets.get(params.targetId);
+    
+    if (!target) {
+      throw new Error(`Publishing target not found: ${params.targetId}`);
+    }
+
+    const scheduleId = uuidv4();
+    const schedule: PublishingSchedule = {
+      id: scheduleId,
+      contentId: params.contentId,
+      targetId: params.targetId,
+      platform: params.platform || target.platform,
+      scheduledDate: params.scheduledDate,
+      status: 'scheduled',
+      retryCount: 0,
+      maxRetries: params.maxRetries || 3,
+      createdAt: new Date()
+    };
+
+    this.publishingSchedules.set(scheduleId, schedule);
+
+    logger.info(`📅 Content scheduled for publishing`, {
+      scheduleId,
+      contentId: params.contentId,
+      platform: schedule.platform,
+      scheduledDate: params.scheduledDate.toISOString()
+    });
+
+    return scheduleId;
+  }
+
+  /**
+   * Cancel scheduled publishing
+   */
+  async cancelScheduledPublishing(scheduleId: string): Promise<boolean> {
+    const schedule = this.publishingSchedules.get(scheduleId);
+    
+    if (!schedule) {
+      logger.warn(`Schedule not found: ${scheduleId}`);
+      return false;
+    }
+
+    if (schedule.status === 'published') {
+      logger.warn(`Cannot cancel already published content: ${scheduleId}`);
+      return false;
+    }
+
+    schedule.status = 'cancelled';
+    
+    logger.info(`❌ Publishing cancelled: ${scheduleId}`);
+    return true;
+  }
+
+  /**
+   * Execute immediate publishing
+   */
+  async publishNow(contentId: string, targetId: string): Promise<PublishingResult> {
+    const target = this.publishingTargets.get(targetId);
+    
+    if (!target) {
+      return {
+        success: false,
+        scheduleId: 'immediate',
+        contentId,
+        platform: 'unknown',
+        errorMessage: `Publishing target not found: ${targetId}`
+      };
+    }
+
+    return await this.executePublishing(contentId, target);
+  }
+
+  /**
+   * Get scheduled publishing items
+   */
+  getScheduledPublishing(filters: {
+    contentId?: string;
+    platform?: string;
+    status?: PublishingSchedule['status'];
+    dateFrom?: Date;
+    dateTo?: Date;
+  } = {}): PublishingSchedule[] {
+    let schedules = Array.from(this.publishingSchedules.values());
+
+    // Apply filters
+    if (filters.contentId) {
+      schedules = schedules.filter(s => s.contentId === filters.contentId);
+    }
+
+    if (filters.platform) {
+      schedules = schedules.filter(s => s.platform === filters.platform);
+    }
+
+    if (filters.status) {
+      schedules = schedules.filter(s => s.status === filters.status);
+    }
+
+    if (filters.dateFrom) {
+      schedules = schedules.filter(s => s.scheduledDate >= filters.dateFrom!);
+    }
+
+    if (filters.dateTo) {
+      schedules = schedules.filter(s => s.scheduledDate <= filters.dateTo!);
+    }
+
+    // Sort by scheduled date
+    schedules.sort((a, b) => a.scheduledDate.getTime() - b.scheduledDate.getTime());
+
+    return schedules;
+  }
+
+  /**
+   * Add publishing target
+   */
+  async addPublishingTarget(target: Omit<PublishingTarget, 'id' | 'publishCount' | 'successRate'>): Promise<string> {
+    const targetId = uuidv4();
+    const publishingTarget: PublishingTarget = {
+      ...target,
+      id: targetId,
+      publishCount: 0,
+      successRate: 100
+    };
+
+    this.publishingTargets.set(targetId, publishingTarget);
+
+    logger.info(`🎯 Publishing target added: ${target.name}`, {
+      targetId,
+      platform: target.platform
+    });
+
+    return targetId;
+  }
+
+  /**
+   * Update publishing target
+   */
+  async updatePublishingTarget(
+    targetId: string, 
+    updates: Partial<Omit<PublishingTarget, 'id' | 'publishCount' | 'successRate'>>
+  ): Promise<boolean> {
+    const target = this.publishingTargets.get(targetId);
+    
+    if (!target) {
+      logger.warn(`Publishing target not found: ${targetId}`);
+      return false;
+    }
+
+    Object.assign(target, updates);
+
+    logger.info(`✏️ Publishing target updated: ${target.name}`, { targetId });
+    return true;
+  }
+
+  /**
+   * Remove publishing target
+   */
+  async removePublishingTarget(targetId: string): Promise<boolean> {
+    const target = this.publishingTargets.get(targetId);
+    
+    if (!target) {
+      logger.warn(`Publishing target not found: ${targetId}`);
+      return false;
+    }
+
+    // Cancel any scheduled publishing for this target
+    const schedules = Array.from(this.publishingSchedules.values())
+      .filter(s => s.targetId === targetId && s.status === 'scheduled');
+
+    schedules.forEach(schedule => {
+      schedule.status = 'cancelled';
+    });
+
+    this.publishingTargets.delete(targetId);
+
+    logger.info(`🗑️ Publishing target removed: ${target.name}`, { targetId });
+    return true;
+  }
+
+  /**
+   * Get publishing statistics
+   */
+  getPublishingStats(): {
+    scheduled: number;
+    published: number;
+    failed: number;
+    cancelled: number;
+    platforms: {
+      [platform: string]: {
+        published: number;
+        failed: number;
+        successRate: number;
+      };
+    };
+    recentActivity: Array<{
+      date: string;
+      published: number;
+      failed: number;
+    }>;
+  } {
+    const schedules = Array.from(this.publishingSchedules.values());
+    
+    const scheduled = schedules.filter(s => s.status === 'scheduled').length;
+    const published = schedules.filter(s => s.status === 'published').length;
+    const failed = schedules.filter(s => s.status === 'failed').length;
+    const cancelled = schedules.filter(s => s.status === 'cancelled').length;
+
+    // Platform statistics
+    const platforms: any = {};
+    schedules.forEach(schedule => {
+      if (!platforms[schedule.platform]) {
+        platforms[schedule.platform] = {
+          published: 0,
+          failed: 0,
+          successRate: 0
+        };
+      }
+
+      if (schedule.status === 'published') {
+        platforms[schedule.platform].published++;
+      } else if (schedule.status === 'failed') {
+        platforms[schedule.platform].failed++;
+      }
+    });
+
+    // Calculate success rates
+    Object.keys(platforms).forEach(platform => {
+      const stats = platforms[platform];
+      const total = stats.published + stats.failed;
+      stats.successRate = total > 0 ? (stats.published / total) * 100 : 100;
+    });
+
+    // Recent activity (last 7 days)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recentSchedules = schedules.filter(s => 
+      s.publishedAt && s.publishedAt >= sevenDaysAgo
+    );
+
+    const recentActivity: any = {};
+    recentSchedules.forEach(schedule => {
+      const date = schedule.publishedAt!.toISOString().split('T')[0];
+      if (!recentActivity[date]) {
+        recentActivity[date] = { published: 0, failed: 0 };
+      }
+
+      if (schedule.status === 'published') {
+        recentActivity[date].published++;
+      } else if (schedule.status === 'failed') {
+        recentActivity[date].failed++;
+      }
+    });
+
+    return {
+      scheduled,
+      published,
+      failed,
+      cancelled,
+      platforms,
+      recentActivity: Object.keys(recentActivity).map(date => ({
+        date,
+        ...recentActivity[date]
+      }))
+    };
+  }
+
+  /**
+   * Start the publishing scheduler
+   */
+  private startPublishingScheduler(): void {
+    // Check for scheduled publishing every minute
+    this.publishingTimer = setInterval(async () => {
+      await this.processScheduledPublishing();
+    }, 60 * 1000); // 60 seconds
+
+    logger.info('⏰ Publishing scheduler started');
+  }
+
+  /**
+   * Stop the publishing scheduler
+   */
+  stopPublishingScheduler(): void {
+    if (this.publishingTimer) {
+      clearInterval(this.publishingTimer);
+      this.publishingTimer = null;
+      logger.info('⏹️ Publishing scheduler stopped');
+    }
+  }
+
+  /**
+   * Process scheduled publishing items
+   */
+  private async processScheduledPublishing(): Promise<void> {
+    const now = new Date();
+    const scheduledItems = Array.from(this.publishingSchedules.values())
+      .filter(schedule => 
+        schedule.status === 'scheduled' && 
+        schedule.scheduledDate <= now
+      );
+
+    if (scheduledItems.length === 0) {
+      return;
+    }
+
+    logger.info(`📝 Processing ${scheduledItems.length} scheduled publishing items`);
+
+    for (const schedule of scheduledItems) {
+      try {
+        const target = this.publishingTargets.get(schedule.targetId);
+        
+        if (!target) {
+          schedule.status = 'failed';
+          schedule.errorMessage = `Publishing target not found: ${schedule.targetId}`;
+          continue;
+        }
+
+        const result = await this.executePublishing(schedule.contentId, target);
+        
+        if (result.success) {
+          schedule.status = 'published';
+          schedule.publishedAt = new Date();
+          schedule.publishedUrl = result.publishedUrl;
+          
+          // Update target statistics
+          target.publishCount++;
+          target.lastUsed = new Date();
+          
+        } else {
+          schedule.retryCount++;
+          
+          if (schedule.retryCount >= schedule.maxRetries) {
+            schedule.status = 'failed';
+            schedule.errorMessage = result.errorMessage;
+          } else {
+            // Schedule retry in 30 minutes
+            schedule.scheduledDate = new Date(now.getTime() + 30 * 60 * 1000);
+            logger.info(`🔄 Retry scheduled for content: ${schedule.contentId}`, {
+              retryCount: schedule.retryCount,
+              maxRetries: schedule.maxRetries
+            });
+          }
+        }
+
+      } catch (error) {
+        schedule.retryCount++;
+        
+        if (schedule.retryCount >= schedule.maxRetries) {
+          schedule.status = 'failed';
+          schedule.errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        } else {
+          schedule.scheduledDate = new Date(now.getTime() + 30 * 60 * 1000);
+        }
+
+        logger.error(`Failed to publish content: ${schedule.contentId}`, error);
+      }
+    }
+  }
+
+  /**
+   * Execute publishing to specific platform
+   */
+  private async executePublishing(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+    logger.info(`🚀 Publishing content to ${target.platform}`, {
+      contentId,
+      targetId: target.id,
+      targetName: target.name
+    });
+
+    try {
+      switch (target.platform) {
+        case 'wordpress':
+          return await this.publishToWordPress(contentId, target);
+        
+        case 'facebook':
+          return await this.publishToFacebook(contentId, target);
+        
+        case 'twitter':
+          return await this.publishToTwitter(contentId, target);
+        
+        case 'linkedin':
+          return await this.publishToLinkedIn(contentId, target);
+        
+        default:
+          return {
+            success: false,
+            scheduleId: 'immediate',
+            contentId,
+            platform: target.platform,
+            errorMessage: `Unsupported platform: ${target.platform}`
+          };
+      }
+
+    } catch (error) {
+      logger.error(`Failed to publish to ${target.platform}:`, error);
+      
+      return {
+        success: false,
+        scheduleId: 'immediate',
+        contentId,
+        platform: target.platform,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Publish to WordPress using MultiSite service
+   */
+  private async publishToWordPress(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+    try {
+      // In a real implementation, retrieve content from database
+      // For now, create mock content
+      const multiSiteRequest: MultiSitePublishingRequest = {
+        title: `Generated Content ${contentId}`,
+        body: `This is automatically generated content with ID: ${contentId}`,
+        excerpt: 'Automatically generated content excerpt',
+        categories: ['Technology', 'AI Generated'],
+        tags: ['automation', 'ai', 'content'],
+        status: 'publish',
+        targetSiteId: target.credentials.siteId // Use specific site ID
+      };
+
+      const result = await this.wordPressMultiSiteService.publishContent(multiSiteRequest);
+
+      if (result.success && result.mainResult) {
+        // Update target stats
+        target.publishCount++;
+        target.lastUsed = new Date();
+        
+        return {
+          success: true,
+          scheduleId: 'immediate',
+          contentId,
+          platform: 'wordpress',
+          publishedUrl: result.mainResult.url,
+          publishedAt: new Date()
+        };
+      }
+
+      return {
+        success: false,
+        scheduleId: 'immediate',
+        contentId,
+        platform: 'wordpress',
+        errorMessage: result.errors.join('; ') || 'Failed to publish to WordPress'
+      };
+
+    } catch (error) {
+      logger.error(`Failed to publish to WordPress via MultiSite service:`, error);
+      
+      return {
+        success: false,
+        scheduleId: 'immediate',
+        contentId,
+        platform: 'wordpress',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Publish to Facebook (placeholder)
+   */
+  private async publishToFacebook(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+    // Placeholder for Facebook publishing
+    logger.info(`📘 Publishing to Facebook: ${contentId}`);
+    
+    // Simulate publishing
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    return {
+      success: true,
+      scheduleId: 'immediate',
+      contentId,
+      platform: 'facebook',
+      publishedUrl: `https://facebook.com/posts/${contentId}`,
+      publishedAt: new Date()
+    };
+  }
+
+  /**
+   * Publish to Twitter (placeholder)
+   */
+  private async publishToTwitter(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+    // Placeholder for Twitter publishing
+    logger.info(`🐦 Publishing to Twitter: ${contentId}`);
+    
+    // Simulate publishing
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    return {
+      success: true,
+      scheduleId: 'immediate',
+      contentId,
+      platform: 'twitter',
+      publishedUrl: `https://twitter.com/posts/${contentId}`,
+      publishedAt: new Date()
+    };
+  }
+
+  /**
+   * Publish to LinkedIn (placeholder)
+   */
+  private async publishToLinkedIn(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+    // Placeholder for LinkedIn publishing
+    logger.info(`💼 Publishing to LinkedIn: ${contentId}`);
+    
+    // Simulate publishing
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    return {
+      success: true,
+      scheduleId: 'immediate',
+      contentId,
+      platform: 'linkedin',
+      publishedUrl: `https://linkedin.com/posts/${contentId}`,
+      publishedAt: new Date()
+    };
+  }
+
+  /**
+   * Initialize default publishing targets using MultiSite service
+   */
+  private initializeDefaultTargets(): void {
+    // Initialize WordPress targets from MultiSite service
+    const sites = this.wordPressMultiSiteService.getSites();
+    
+    for (const site of sites) {
+      if (site.isActive) {
+        const wordPressTarget: PublishingTarget = {
+          id: `wordpress-${site.id}`,
+          platform: 'wordpress',
+          name: site.name,
+          credentials: {
+            baseUrl: site.url,
+            username: site.username,
+            password: site.password,
+            siteId: site.id
+          },
+          isActive: true,
+          publishCount: 0,
+          successRate: 100
+        };
+
+        this.publishingTargets.set(`wordpress-${site.id}`, wordPressTarget);
+      }
+    }
+
+    logger.info(`✅ Initialized ${sites.length} WordPress targets từ MultiSite service`, {
+      targets: sites.map(s => s.name)
+    });
+  }
+
+  /**
+   * Get publishing targets
+   */
+  getPublishingTargets(): PublishingTarget[] {
+    return Array.from(this.publishingTargets.values());
+  }
+
+  /**
+   * Smart publish content using AI-powered routing
+   */
+  async smartPublishContent(content: {
+    title: string;
+    body: string;
+    excerpt?: string;
+    categories?: string[];
+    tags?: string[];
+    contentType?: 'wedding' | 'pre-wedding' | 'yearbook-school' | 'yearbook-concept' | 'corporate' | 'general';
+  }): Promise<PublishingResult> {
+    try {
+      const multiSiteRequest: MultiSitePublishingRequest = {
+        title: content.title,
+        body: content.body,
+        excerpt: content.excerpt,
+        categories: content.categories || [],
+        tags: content.tags || [],
+        status: 'publish',
+        contentType: content.contentType
+      };
+
+      const result = await this.wordPressMultiSiteService.publishContent(multiSiteRequest);
+
+      if (result.success && result.mainResult) {
+        // Update target stats
+        const targetId = `wordpress-${result.mainResult.siteId}`;
+        const target = this.publishingTargets.get(targetId);
+        if (target) {
+          target.publishCount++;
+          target.lastUsed = new Date();
+        }
+
+        logger.info(`✅ Smart published to ${result.mainResult.siteName}`, {
+          contentId: result.mainResult.postId,
+          url: result.mainResult.url
+        });
+
+        return {
+          success: true,
+          scheduleId: 'smart-immediate',
+          contentId: result.mainResult.postId.toString(),
+          platform: 'wordpress',
+          publishedUrl: result.mainResult.url,
+          publishedAt: new Date()
+        };
+      }
+
+      return {
+        success: false,
+        scheduleId: 'smart-immediate',
+        contentId: 'unknown',
+        platform: 'wordpress',
+        errorMessage: result.errors.join('; ') || 'Smart publishing failed'
+      };
+
+    } catch (error) {
+      logger.error('Failed to smart publish content:', error);
+      
+      return {
+        success: false,
+        scheduleId: 'smart-immediate',
+        contentId: 'unknown',
+        platform: 'wordpress',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Cross-post content to multiple WordPress sites
+   */
+  async crossPostContent(
+    content: {
+      title: string;
+      body: string;
+      excerpt?: string;
+      categories?: string[];
+      tags?: string[];
+    },
+    targetSiteIds: string[]
+  ): Promise<{
+    success: boolean;
+    results: PublishingResult[];
+    successCount: number;
+    failureCount: number;
+  }> {
+    try {
+      const multiSiteRequest: MultiSitePublishingRequest = {
+        title: content.title,
+        body: content.body,
+        excerpt: content.excerpt,
+        categories: content.categories || [],
+        tags: content.tags || [],
+        status: 'publish'
+      };
+
+      const result = await this.wordPressMultiSiteService.publishToMultipleSites(
+        multiSiteRequest,
+        targetSiteIds
+      );
+
+      const publishingResults: PublishingResult[] = result.results.map(r => ({
+        success: r.success,
+        scheduleId: 'cross-post-immediate',
+        contentId: r.postId?.toString() || 'unknown',
+        platform: 'wordpress',
+        publishedUrl: r.url,
+        publishedAt: r.success ? new Date() : undefined,
+        errorMessage: r.error
+      }));
+
+      // Update target stats
+      for (const r of result.results) {
+        if (r.success) {
+          const targetId = `wordpress-${r.siteId}`;
+          const target = this.publishingTargets.get(targetId);
+          if (target) {
+            target.publishCount++;
+            target.lastUsed = new Date();
+          }
+        }
+      }
+
+      logger.info(`📰 Cross-posted to ${result.totalPublished}/${targetSiteIds.length} sites`);
+
+      return {
+        success: result.success,
+        results: publishingResults,
+        successCount: result.totalPublished,
+        failureCount: targetSiteIds.length - result.totalPublished
+      };
+
+    } catch (error) {
+      logger.error('Failed to cross-post content:', error);
+      
+      return {
+        success: false,
+        results: [],
+        successCount: 0,
+        failureCount: targetSiteIds.length
+      };
+    }
+  }
+
+  /**
+   * Test all WordPress site connections
+   */
+  async testWordPressSiteConnections(): Promise<{
+    [siteId: string]: {
+      success: boolean;
+      siteName: string;
+      url: string;
+      error?: string;
+      responseTime?: number;
+    };
+  }> {
+    return await this.wordPressMultiSiteService.testAllConnections();
+  }
+
+  /**
+   * Get WordPress site configuration and stats
+   */
+  getWordPressSiteStats(): {
+    totalSites: number;
+    activeSites: number;
+    routingRules: number;
+    siteStats: Array<{
+      siteId: string;
+      siteName: string;
+      isActive: boolean;
+      categories: number;
+      keywords: number;
+      priority: number;
+    }>;
+  } {
+    return this.wordPressMultiSiteService.getPublishingStats();
+  }
+
+  /**
+   * Get available WordPress sites
+   */
+  getWordPressSites(): Array<{
+    id: string;
+    name: string;
+    url: string;
+    isActive: boolean;
+    categories: string[];
+    keywords: string[];
+  }> {
+    return this.wordPressMultiSiteService.getSites().map(site => ({
+      id: site.id,
+      name: site.name,
+      url: site.url,
+      isActive: site.isActive,
+      categories: site.categories,
+      keywords: site.keywords
+    }));
+  }
+
+  /**
+   * Update WordPress site configuration
+   */
+  async updateWordPressSite(siteId: string, updates: {
+    isActive?: boolean;
+    categories?: string[];
+    keywords?: string[];
+    priority?: number;
+  }): Promise<boolean> {
+    const success = this.wordPressMultiSiteService.updateSiteConfig(siteId, updates);
+    
+    if (success) {
+      // Reinitialize targets to reflect changes
+      this.publishingTargets.clear();
+      this.initializeDefaultTargets();
+    }
+    
+    return success;
+  }
+
+  /**
+   * Shutdown the service
+   */
+  shutdown(): void {
+    this.stopPublishingScheduler();
+    logger.info('⏹️ AutomatedPublishingService shutdown complete');
   }
 } 

@@ -4,6 +4,8 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import { logger } from '../utils/logger';
 import type { ScrapingOptions, ScrapingResult } from '../types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Enhanced Web Scraping Service with Playwright and Readability
@@ -133,13 +135,21 @@ export class WebScrapingService {
     const page = await context.newPage();
 
     try {
-      // Set timeout
-      page.setDefaultTimeout(options.timeout || 30000);
+      // Inject Readability.js script into the page
+      const readabilityScriptPath = path.join(process.cwd(), 'node_modules', '@mozilla', 'readability', 'Readability.js');
+      if (fs.existsSync(readabilityScriptPath)) {
+        await page.addScriptTag({ path: readabilityScriptPath });
+      } else {
+        logger.warn('Readability.js script not found, scraping may be less effective.');
+      }
+
+      // Set timeout to 60 seconds
+      page.setDefaultTimeout(options.timeout || 60000);
       
-      // Navigate to URL
+      // Navigate to URL with optimized settings
       await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: options.timeout || 30000
+        waitUntil: 'domcontentloaded', // More reliable than networkidle
+        timeout: options.timeout || 60000
       });
 
       // Wait for content to load
@@ -149,154 +159,45 @@ export class WebScrapingService {
         });
       }
 
-      // Extract content
+      // Extract content using Readability.js inside the browser context
       const extractedData = await page.evaluate(() => {
-        // Remove unwanted elements
-          const unwantedSelectors = [
-            'script', 'style', 'nav', 'header', 'footer', 
-          '.advertisement', '.ads', '.popup', '.modal',
-          '[role="banner"]', '[role="navigation"]', '[role="complementary"]'
-          ];
+        // Clone the document to avoid side-effects from Readability
+        const documentClone = document.cloneNode(true) as Document;
         
-          unwantedSelectors.forEach(selector => {
-            document.querySelectorAll(selector).forEach(el => el.remove());
-          });
+        // Use Readability
+        // Note: Readability is not available in the browser context by default.
+        // This will be fixed in the next step by injecting the script.
+        // @ts-ignore
+        const reader = new Readability(documentClone);
+        const article = reader.parse();
 
-        // Extract title
-        const title = document.querySelector('h1')?.textContent?.trim() || 
-                     document.title || 
-                     'No title found';
-
-        // Extract main content using multiple selectors
-          const contentSelectors = [
-          'article', 'main', '[role="main"]', '.content', '.post-content',
-          '.entry-content', '.article-content', '.post-body', '.content-body'
-          ];
-          
-        let content = '';
-          for (const selector of contentSelectors) {
-            const element = document.querySelector(selector);
-            if (element) {
-              const clone = element.cloneNode(true) as Element;
-            // Remove nested unwanted elements
-            unwantedSelectors.forEach(unwanted => {
-              clone.querySelectorAll(unwanted).forEach(el => el.remove());
-            });
-            content = clone.textContent?.trim() || '';
-            if (content.length > 100) break;
-            }
-          }
-          
-        // Fallback to body content
-        if (!content) {
-          const paragraphs = Array.from(document.querySelectorAll('p'))
-            .map(p => p.textContent?.trim())
-            .filter(text => text && text.length > 20)
-            .join('\n\n');
-          content = paragraphs || document.body.textContent?.trim() || '';
-        }
-
-        // Extract metadata
+        // Fallback if Readability fails
+        const title = article?.title || document.title;
+        const content = article?.textContent || document.body.textContent || '';
+        const excerpt = article?.excerpt || content.substring(0, 150);
+        
+        // Basic metadata extraction
         const getMetaContent = (name: string) => {
-          const selectors = [
-            `meta[name="${name}"]`,
-            `meta[property="og:${name}"]`,
-            `meta[property="${name}"]`
-          ];
-          for (const selector of selectors) {
-            const meta = document.querySelector(selector) as HTMLMetaElement;
-            if (meta?.content) return meta.content;
-          }
-          return '';
+          const meta = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement;
+          return meta ? meta.content : '';
         };
 
-        const description = getMetaContent('description') || 
-                           document.querySelector('p')?.textContent?.substring(0, 160) || '';
+        const images = Array.from(document.querySelectorAll('article img, main img, .post-content img'))
+          .map(img => (img as HTMLImageElement).src)
+          .filter(src => src && src.length > 50)
+          .slice(0, 10);
 
-        // Extract images - Smart filtering approach
-        const images = Array.from(document.querySelectorAll('img'))
-          .map(img => {
-            const imgElement = img as HTMLImageElement;
-            let src = imgElement.src || imgElement.getAttribute('data-src') || imgElement.getAttribute('data-lazy-src');
-            
-            // Handle relative URLs
-            if (src && !src.startsWith('http')) {
-              if (src.startsWith('//')) {
-                src = window.location.protocol + src;
-              } else if (src.startsWith('/')) {
-                src = window.location.origin + src;
-              } else {
-                src = window.location.origin + '/' + src;
-              }
-            }
-            
-            return src;
-          })
-          .filter(src => src && src.length > 0)
-          .filter(src => {
-            const srcLower = src.toLowerCase();
-            
-            // Remove team photos specifically for this site
-            if (srcLower.includes('doi-ngu') || srcLower.includes('guu-studio-doi-ngu')) {
-              return false;
-            }
-            
-            // Remove obvious non-content images
-            const unwanted = ['icon', 'logo', 'pixel', 'tracking', '1x1', 'avatar'];
-            if (unwanted.some(pattern => srcLower.includes(pattern))) {
-              return false;
-            }
-            
-            // Keep if reasonable length
-            return src.length > 50;
-          })
-          .slice(0, 8);
-
-        // Enhanced language detection - Content-first approach
-        const detectLanguage = () => {
-          // First, detect Vietnamese content by analyzing text
-          const sampleText = (title + ' ' + content).toLowerCase();
-          const vietnameseWords = ['việt', 'nam', 'của', 'và', 'cho', 'với', 'trong', 'một', 'có', 'là', 'được', 'để', 'này', 'đó', 'những', 'các', 'không', 'từ', 'tại', 'về', 'theo', 'như', 'sẽ', 'đã', 'đang', 'khi', 'nếu', 'thì', 'còn', 'cũng', 'đều', 'chỉ', 'giữa', 'sau', 'trước', 'ngoài', 'bên', 'dưới', 'trên', 'giờ', 'ngày', 'tháng', 'năm', 'đám', 'cưới', 'lễ', 'nghi', 'truyền', 'thống'];
-          const vietnameseCount = vietnameseWords.filter(word => sampleText.includes(word)).length;
-          
-          // Also check for Vietnamese diacritics
-          const vietnameseDiacritics = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/g;
-          const diacriticMatches = (sampleText.match(vietnameseDiacritics) || []).length;
-          
-          // Strong Vietnamese indicators
-          if (vietnameseCount >= 5 || diacriticMatches >= 10) {
-            return 'vi';
-          }
-          
-          // Check domain for Vietnamese sites
-          const domain = window.location.hostname.toLowerCase();
-          if (domain.includes('.vn') || domain.includes('vietnam')) {
-            return 'vi';
-          }
-          
-          // Check HTML lang attribute as secondary
-          const htmlLang = document.documentElement.lang;
-          if (htmlLang && !htmlLang.startsWith('en')) return htmlLang;
-          
-          // Check meta language
-          const metaLang = document.querySelector('meta[http-equiv="content-language"]')?.getAttribute('content') ||
-                          document.querySelector('meta[name="language"]')?.getAttribute('content');
-          if (metaLang && !metaLang.startsWith('en')) return metaLang;
-          
-          // Default fallback
-          return 'en';
-        };
-        
         return {
           title,
           content,
+          excerpt,
           metadata: {
-            description,
-            author: getMetaContent('author') || '',
-            publishDate: getMetaContent('published_time') || getMetaContent('article:published_time') || '',
+            description: getMetaContent('description') || excerpt,
+            author: getMetaContent('author') || article?.byline || '',
+            publishDate: getMetaContent('article:published_time') || '',
             images,
-          domain: window.location.hostname,
-            language: detectLanguage()
+            language: document.documentElement.lang || 'en',
+            domain: window.location.hostname
           }
         };
       });

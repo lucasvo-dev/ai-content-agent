@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { LinkBasedContentService, CreateBatchJobRequest } from '../services/LinkBasedContentService';
 import { WebScrapingService } from '../services/WebScrapingService';
+import { PhotoGalleryService } from '../services/PhotoGalleryService';
+import { EnhancedContentService } from '../services/EnhancedContentService';
 import { asyncHandler } from '../utils/asyncHandler';
 import { logger } from '../utils/logger';
 import type { BrandVoiceConfig } from '../types';
@@ -11,10 +13,14 @@ import type { BrandVoiceConfig } from '../types';
 export class LinkContentController {
   private linkContentService: LinkBasedContentService;
   private webScrapingService: WebScrapingService;
+  private photoGalleryService: PhotoGalleryService;
+  private enhancedContentService: EnhancedContentService;
 
   constructor() {
     this.linkContentService = new LinkBasedContentService();
     this.webScrapingService = new WebScrapingService();
+    this.photoGalleryService = new PhotoGalleryService();
+    this.enhancedContentService = new EnhancedContentService();
   }
 
   /**
@@ -488,6 +494,201 @@ export class LinkContentController {
         error: {
           code: 'HEALTH_CHECK_FAILED',
           message: 'Service health check failed'
+        }
+      });
+    }
+  });
+
+  /**
+   * Get available image categories from Photo Gallery
+   * GET /api/v1/link-content/image-categories
+   */
+  getImageCategories = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    try {
+      const categoriesRaw = await this.photoGalleryService.getCategories(true);
+      const categories = categoriesRaw.map((c: any) => ({
+        id: c.id || c.category_slug || c.slug || c.key || c.id,
+        category_name: c.category_name || c.name,
+        category_slug: c.category_slug || c.id || c.slug,
+        description: c.description || '',
+        color_code: c.color_code || '#6B7280',
+        folder_count: c.folder_count || 0
+      }));
+      
+      res.json({
+        success: true,
+        data: { categories },
+        message: 'Image categories retrieved successfully'
+      });
+    } catch (error) {
+      logger.error('Failed to get image categories:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GALLERY_ERROR',
+          message: 'Failed to retrieve image categories'
+        }
+      });
+    }
+  });
+
+  /**
+   * Get folders by category
+   * GET /api/v1/link-content/image-folders/:categorySlug
+   */
+  getImageFolders = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const { categorySlug } = req.params;
+    
+    if (!categorySlug) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Category slug is required'
+        }
+      });
+      return;
+    }
+
+    try {
+      const folders = await this.photoGalleryService.getFoldersByCategory(categorySlug);
+      
+      res.json({
+        success: true,
+        data: { folders },
+        message: 'Image folders retrieved successfully'
+      });
+    } catch (error) {
+      logger.error('Failed to get image folders:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GALLERY_ERROR',
+          message: 'Failed to retrieve image folders'
+        }
+      });
+    }
+  });
+
+  /**
+   * Preview images from a folder or category
+   * GET /api/v1/link-content/preview-images
+   */
+  previewImages = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const { categorySlug, folderName, limit = '5' } = req.query as { [key: string]: string };
+    
+    try {
+      // Fetch images by category (if provided) - use retry with mock fallback
+      const result = await this.photoGalleryService.getFeaturedImagesWithRetry({
+        category: categorySlug || undefined,
+        limit: parseInt(limit, 10),
+        metadata: true,
+        priority: 'desc',
+        maxRetries: 1
+      });
+
+      let images = result.images;
+
+      // Optional folder filtering (client-side) if folderName is provided
+      if (folderName) {
+        images = images.filter(img => img.folder_path?.toLowerCase().includes(folderName.toLowerCase()));
+      }
+      
+      logger.info(`📸 Preview images: ${images.length} images returned for category="${categorySlug}"`);
+      
+      res.json({
+        success: true,
+        data: { images },
+        message: 'Preview images retrieved successfully'
+      });
+    } catch (error) {
+      logger.error('Failed to preview images:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GALLERY_ERROR',
+          message: 'Failed to retrieve preview images'
+        }
+      });
+    }
+  });
+
+  /**
+   * Generate content with image integration
+   * POST /api/v1/link-content/generate-enhanced
+   */
+  generateEnhancedContent = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const { sourceContent, settings } = req.body;
+    
+    if (!sourceContent || !settings) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Source content and settings are required'
+        }
+      });
+      return;
+    }
+
+    try {
+      // Convert frontend format to EnhancedContentRequest format
+      const request = {
+        type: settings.contentType === 'wordpress_blog' ? 'blog_post' : 'social_media',
+        topic: sourceContent.title || 'Content Topic',
+        context: sourceContent.content,
+        targetAudience: settings.targetAudience || 'General audience',
+        keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],
+        brandVoice: {
+          tone: settings.tone || 'professional',
+          style: 'conversational',
+          vocabulary: 'advanced',
+          length: 'comprehensive',
+          brandName: settings.brandName || 'Your Brand'
+        },
+        preferredProvider: settings.preferredProvider || 'auto',
+        imageSettings: settings.includeImages ? {
+          includeImages: true,
+          imageSelection: settings.imageSelection,
+          imageCategory: settings.imageCategory,
+          specificFolder: settings.specificFolder,
+          maxImages: settings.maxImages || 3,
+          ensureConsistency: settings.ensureConsistency || false
+        } : { includeImages: false },
+        language: settings.language || 'vietnamese',
+        specialInstructions: settings.specialRequest || ''
+      };
+
+      logger.info('🎨 Starting enhanced content generation with images', {
+        topic: request.topic,
+        includeImages: request.imageSettings?.includeImages,
+        imageSelection: request.imageSettings?.imageSelection,
+        imageCategory: request.imageSettings?.imageCategory
+      });
+      
+      const enhancedContent = await this.enhancedContentService.generateContentWithImages(request);
+      
+      // Log the result to check if images were added
+      logger.info('✅ Enhanced content generated', {
+        hasMetadata: !!enhancedContent.metadata,
+        hasFeaturedImage: !!enhancedContent.metadata?.featuredImage,
+        galleryImagesCount: enhancedContent.metadata?.galleryImages?.length || 0
+      });
+      
+      res.json({
+        success: true,
+        data: enhancedContent,
+        enhanced: true,
+        withImages: !!enhancedContent.metadata?.featuredImage,
+        message: 'Enhanced content generated successfully'
+      });
+    } catch (error) {
+      logger.error('Failed to generate enhanced content:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GENERATION_ERROR',
+          message: 'Failed to generate enhanced content'
         }
       });
     }

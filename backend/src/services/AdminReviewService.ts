@@ -18,8 +18,45 @@ interface ContentEdit {
   adminId: string;
 }
 
+export interface ReviewItem {
+  id?: string;
+  content: {
+    id: string;
+    title: string;
+    body: string;
+    excerpt: string;
+    type: 'blog_post' | 'social_media' | 'email' | 'ad_copy';
+    metadata: {
+      keywords: string[];
+      seoTitle: string;
+      seoDescription: string;
+      qualityScore: number;
+    };
+  };
+  qualityScore: number;
+  aiProvider: string;
+  autoApproved: boolean;
+  sourceReference: {
+    url: string;
+    title: string;
+  };
+  status: 'pending' | 'approved' | 'rejected' | 'needs_revision';
+  reviewNotes?: string;
+  submittedAt: Date;
+  reviewedAt?: Date;
+  reviewedBy?: string;
+}
+
+export interface ReviewQueueOptions {
+  limit?: number;
+  qualityScoreMin?: number;
+  status?: ReviewItem['status'];
+  autoApprovedOnly?: boolean;
+}
+
 export class AdminReviewService {
-  private reviewQueue: Map<string, ReviewQueueItem> = new Map();
+  private reviewQueue: ReviewItem[] = [];
+  private approvedContent: ReviewItem[] = [];
   private qualityScores: Map<string, QualityScore> = new Map();
   private settings: ReviewQueueSettings = {
     autoApprovalThreshold: 85,
@@ -28,359 +65,289 @@ export class AdminReviewService {
   };
 
   constructor() {
-    logger.info('AdminReviewService initialized');
+    logger.info('📋 AdminReviewService initialized');
   }
 
   /**
    * Add content to review queue
    */
-  async addToReviewQueue(
-    content: GeneratedContent,
-    batchJobId?: string,
-    priority: number = 1
-  ): Promise<ReviewQueueItem> {
-    try {
-      const reviewId = `review_${Date.now()}_${uuidv4().slice(0, 8)}`;
-      
-      // Calculate quality score
-      const qualityScore = await this.calculateQualityScore(content);
-      
-      const reviewItem: ReviewQueueItem = {
-        id: reviewId,
-        contentId: content.id,
-        batchJobId,
-        content,
-        status: 'pending',
-        priority,
-        qualityScore,
-        preview: this.generatePreview(content),
-        estimatedReadTime: this.calculateReadTime(content.body),
-        createdAt: new Date(),
-        metadata: {
-          aiProvider: content.aiProvider || 'unknown',
-          uniquenessScore: content.metadata?.uniquenessScore || 0,
-          seoScore: content.metadata?.seoScore || 0,
-          sourceUrls: content.sourceResearch || []
-        }
-      };
-
-      // Auto-approve high quality content if enabled
-      if (qualityScore.overall >= this.settings.autoApprovalThreshold) {
-        reviewItem.status = 'auto_approved';
-        reviewItem.autoApproved = true;
-        reviewItem.reviewedAt = new Date();
-        logger.info(`Content ${content.id} auto-approved with quality score ${qualityScore.overall}`);
-      }
-
-      this.reviewQueue.set(reviewId, reviewItem);
-      this.qualityScores.set(content.id, qualityScore);
-
-      logger.info(`Content added to review queue: ${reviewId}`);
-      return reviewItem;
-    } catch (error) {
-      logger.error('Error adding content to review queue:', error);
-      throw new AppError('Failed to add content to review queue', 500);
-    }
-  }
-
-  /**
-   * Get review queue items with filters
-   */
-  async getReviewQueue(
-    adminId: string,
-    filters: ReviewFilters = {}
-  ): Promise<{
-    reviewItems: ReviewQueueItem[];
-    summary: ReviewMetrics;
-    pagination: {
-      total: number;
-      limit: number;
-      offset: number;
-      hasNext: boolean;
+  async addToReviewQueue(item: Omit<ReviewItem, 'id' | 'submittedAt' | 'status'>): Promise<string> {
+    const reviewItem: ReviewItem = {
+      ...item,
+      id: uuidv4(),
+      status: item.autoApproved ? 'approved' : 'pending',
+      submittedAt: new Date()
     };
-  }> {
-    try {
-      let items = Array.from(this.reviewQueue.values());
 
-      // Apply filters
-      if (filters.status) {
-        items = items.filter(item => item.status === filters.status);
-      }
-      if (filters.batchJobId) {
-        items = items.filter(item => item.batchJobId === filters.batchJobId);
-      }
-      if (filters.priority) {
-        const priorityMap = { low: 1, medium: 2, high: 3 };
-        items = items.filter(item => item.priority >= priorityMap[filters.priority as keyof typeof priorityMap]);
-      }
-
-      // Sort by priority and creation date
-      items.sort((a, b) => {
-        if (a.priority !== b.priority) {
-          return b.priority - a.priority; // Higher priority first
-        }
-        return a.createdAt.getTime() - b.createdAt.getTime(); // Older first
+    if (item.autoApproved) {
+      this.approvedContent.push(reviewItem);
+      logger.info(`✅ Content auto-approved: ${reviewItem.content.title}`, {
+        id: reviewItem.id,
+        qualityScore: reviewItem.qualityScore
       });
-
-      const total = items.length;
-      const limit = filters.limit || 20;
-      const offset = filters.offset || 0;
-      const paginatedItems = items.slice(offset, offset + limit);
-
-      // Calculate summary metrics
-      const summary = this.calculateReviewMetrics(items);
-
-      return {
-        reviewItems: paginatedItems,
-        summary,
-        pagination: {
-          total,
-          limit,
-          offset,
-          hasNext: offset + limit < total
-        }
-      };
-    } catch (error) {
-      logger.error('Error getting review queue:', error);
-      throw new AppError('Failed to get review queue', 500);
-    }
-  }
-
-  /**
-   * Approve single content
-   */
-  async approveContent(
-    contentId: string,
-    adminId: string,
-    options: ApprovalOptions = { approve: true }
-  ): Promise<ApprovalResult> {
-    try {
-      const reviewItem = this.findReviewItemByContentId(contentId);
-      
-      if (!reviewItem) {
-        throw new AppError('Content not found in review queue', 404);
-      }
-
-      if (reviewItem.status === 'approved') {
-        throw new AppError('Content already approved', 400);
-      }
-
-      // Apply edits if provided
-      let finalContent = reviewItem.content;
-      if (options.edits && Object.keys(options.edits).length > 0) {
-        finalContent = await this.applyContentEdits(reviewItem.content, options.edits, adminId);
-      }
-
-      // Update review item
-      reviewItem.status = 'approved';
-      reviewItem.reviewedBy = adminId;
-      reviewItem.reviewedAt = new Date();
-      reviewItem.adminNotes = options.notes;
-      reviewItem.qualityRating = options.qualityRating || (typeof reviewItem.qualityScore === 'number' ? reviewItem.qualityScore : reviewItem.qualityScore.overall || 0);
-      reviewItem.content = finalContent;
-
-      // Add to fine-tuning dataset
-      await this.addToFineTuningDataset(finalContent, {
-        qualityRating: reviewItem.qualityRating,
-        adminApproved: true,
-        approvedBy: adminId
+    } else {
+      this.reviewQueue.push(reviewItem);
+      logger.info(`📝 Content added to review queue: ${reviewItem.content.title}`, {
+        id: reviewItem.id,
+        qualityScore: reviewItem.qualityScore
       });
-
-      logger.info(`Content approved: ${contentId} by admin ${adminId}`);
-
-      return {
-        success: true,
-        contentId,
-        message: 'Content approved successfully',
-        status: 'approved',
-        reviewedBy: adminId,
-        reviewedAt: reviewItem.reviewedAt,
-        qualityRating: reviewItem.qualityRating,
-        queuedForPublishing: options.autoPublish || false,
-        addedToTrainingDataset: true
-      };
-    } catch (error) {
-      logger.error(`Error approving content ${contentId}:`, error);
-      throw error instanceof AppError ? error : new AppError('Failed to approve content', 500);
     }
+
+    return reviewItem.id!;
   }
 
   /**
-   * Reject content
+   * Get approved content for publishing
    */
-  async rejectContent(
-    contentId: string,
-    adminId: string,
-    reason: string,
-    options: { regenerate?: boolean } = {}
-  ): Promise<ApprovalResult> {
-    try {
-      const reviewItem = this.findReviewItemByContentId(contentId);
-      
-      if (!reviewItem) {
-        throw new AppError('Content not found in review queue', 404);
-      }
-
-      reviewItem.status = 'rejected';
-      reviewItem.reviewedBy = adminId;
-      reviewItem.reviewedAt = new Date();
-      reviewItem.adminNotes = reason;
-
-      logger.info(`Content rejected: ${contentId} by admin ${adminId}, reason: ${reason}`);
-
-      return {
-        success: true,
-        contentId,
-        status: 'rejected',
-        reviewedBy: adminId,
-        reviewedAt: reviewItem.reviewedAt,
-        regenerationQueued: options.regenerate || false
-      };
-    } catch (error) {
-      logger.error(`Error rejecting content ${contentId}:`, error);
-      throw error instanceof AppError ? error : new AppError('Failed to reject content', 500);
-    }
-  }
-
-  /**
-   * Bulk approve/reject content
-   */
-  async bulkApprove(
-    contentIds: string[],
-    adminId: string,
-    options: BulkApprovalOptions
-  ): Promise<{
-    successCount: number;
-    errorCount: number;
-    results: ApprovalResult[];
-    errors: Array<{ contentId: string; error: string }>;
+  async getApprovedContent(options: ReviewQueueOptions = {}): Promise<{
+    items: ReviewItem[];
+    totalCount: number;
   }> {
-    try {
-      const results: ApprovalResult[] = [];
-      const errors: Array<{ contentId: string; error: string }> = [];
+    let filtered = this.approvedContent.filter(item => item.status === 'approved');
 
-      // Process in chunks to avoid overwhelming the system
-      const concurrency = options.concurrency || 5;
-      const chunks = this.chunkArray(contentIds, concurrency);
-
-      for (const chunk of chunks) {
-        const chunkPromises = chunk.map(async (contentId) => {
-          try {
-            const result = await this.approveContent(contentId, adminId, {
-              approve: true,
-              autoPublish: options.autoPublish,
-              qualityRating: options.defaultQualityRating || 4,
-              notes: options.adminNotes
-            });
-            results.push(result);
-          } catch (error) {
-            errors.push({
-              contentId,
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
-          }
-        });
-
-        await Promise.all(chunkPromises);
-        
-        // Add delay between chunks to prevent rate limiting
-        if (chunks.indexOf(chunk) < chunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-
-      logger.info(`Bulk approval completed: ${results.length} successful, ${errors.length} errors`);
-
-      return {
-        successCount: results.length,
-        errorCount: errors.length,
-        results,
-        errors
-      };
-    } catch (error) {
-      logger.error('Error in bulk approval:', error);
-      throw new AppError('Failed to process bulk approval', 500);
+    // Apply filters
+    if (options.qualityScoreMin) {
+      filtered = filtered.filter(item => item.qualityScore >= options.qualityScoreMin!);
     }
+
+    if (options.autoApprovedOnly) {
+      filtered = filtered.filter(item => item.autoApproved);
+    }
+
+    // Sort by quality score descending
+    filtered.sort((a, b) => b.qualityScore - a.qualityScore);
+
+    // Apply limit
+    const items = options.limit ? filtered.slice(0, options.limit) : filtered;
+
+    return {
+      items,
+      totalCount: filtered.length
+    };
   }
 
   /**
-   * Edit content in review queue
+   * Get pending review items
    */
-  async editContent(
-    contentId: string,
-    adminId: string,
-    edits: Record<string, any>
-  ): Promise<{ success: boolean; content: GeneratedContent }> {
-    try {
-      const reviewItem = this.findReviewItemByContentId(contentId);
-      
-      if (!reviewItem) {
-        throw new AppError('Content not found in review queue', 404);
-      }
+  async getPendingReview(options: ReviewQueueOptions = {}): Promise<{
+    items: ReviewItem[];
+    totalCount: number;
+  }> {
+    let filtered = this.reviewQueue.filter(item => item.status === 'pending');
 
-      const updatedContent = await this.applyContentEdits(reviewItem.content, edits, adminId);
-      reviewItem.content = updatedContent;
-      reviewItem.status = 'editing';
-      reviewItem.lastEditedBy = adminId;
-      reviewItem.lastEditedAt = new Date();
-
-      // Recalculate quality score after edits
-      const newQualityScore = await this.calculateQualityScore(updatedContent);
-      reviewItem.qualityScore = newQualityScore;
-      this.qualityScores.set(contentId, newQualityScore);
-
-      logger.info(`Content edited: ${contentId} by admin ${adminId}`);
-
-      return {
-        success: true,
-        content: updatedContent
-      };
-    } catch (error) {
-      logger.error(`Error editing content ${contentId}:`, error);
-      throw error instanceof AppError ? error : new AppError('Failed to edit content', 500);
+    // Apply filters
+    if (options.qualityScoreMin) {
+      filtered = filtered.filter(item => item.qualityScore >= options.qualityScoreMin!);
     }
+
+    // Sort by quality score descending, then by submitted date
+    filtered.sort((a, b) => {
+      if (a.qualityScore !== b.qualityScore) {
+        return b.qualityScore - a.qualityScore;
+      }
+      return a.submittedAt.getTime() - b.submittedAt.getTime();
+    });
+
+    // Apply limit
+    const items = options.limit ? filtered.slice(0, options.limit) : filtered;
+
+    return {
+      items,
+      totalCount: filtered.length
+    };
   }
 
   /**
-   * Get approved content by ID
+   * Approve content item
    */
-  async getApprovedContent(contentId: string): Promise<GeneratedContent | null> {
-    try {
-      const reviewItem = this.findReviewItemByContentId(contentId);
-      
-      if (!reviewItem) {
-        return null;
-      }
-
-      if (reviewItem.status !== 'approved' && reviewItem.status !== 'auto_approved') {
-        return null;
-      }
-
-      return reviewItem.content;
-    } catch (error) {
-      logger.error(`Error getting approved content ${contentId}:`, error);
-      throw new AppError('Failed to get approved content', 500);
+  async approveContent(itemId: string, reviewedBy: string, notes?: string): Promise<boolean> {
+    const itemIndex = this.reviewQueue.findIndex(item => item.id === itemId);
+    
+    if (itemIndex === -1) {
+      logger.warn(`Review item not found: ${itemId}`);
+      return false;
     }
+
+    const item = this.reviewQueue[itemIndex];
+    item.status = 'approved';
+    item.reviewedAt = new Date();
+    item.reviewedBy = reviewedBy;
+    item.reviewNotes = notes;
+
+    // Move to approved content
+    this.approvedContent.push(item);
+    this.reviewQueue.splice(itemIndex, 1);
+
+    logger.info(`✅ Content approved: ${item.content.title}`, {
+      id: itemId,
+      reviewedBy,
+      qualityScore: item.qualityScore
+    });
+
+    return true;
+  }
+
+  /**
+   * Reject content item
+   */
+  async rejectContent(itemId: string, reviewedBy: string, reason: string): Promise<boolean> {
+    const itemIndex = this.reviewQueue.findIndex(item => item.id === itemId);
+    
+    if (itemIndex === -1) {
+      logger.warn(`Review item not found: ${itemId}`);
+      return false;
+    }
+
+    const item = this.reviewQueue[itemIndex];
+    item.status = 'rejected';
+    item.reviewedAt = new Date();
+    item.reviewedBy = reviewedBy;
+    item.reviewNotes = reason;
+
+    logger.info(`❌ Content rejected: ${item.content.title}`, {
+      id: itemId,
+      reviewedBy,
+      reason
+    });
+
+    return true;
+  }
+
+  /**
+   * Request revision for content item
+   */
+  async requestRevision(itemId: string, reviewedBy: string, revisionNotes: string): Promise<boolean> {
+    const itemIndex = this.reviewQueue.findIndex(item => item.id === itemId);
+    
+    if (itemIndex === -1) {
+      logger.warn(`Review item not found: ${itemId}`);
+      return false;
+    }
+
+    const item = this.reviewQueue[itemIndex];
+    item.status = 'needs_revision';
+    item.reviewedAt = new Date();
+    item.reviewedBy = reviewedBy;
+    item.reviewNotes = revisionNotes;
+
+    logger.info(`🔄 Revision requested: ${item.content.title}`, {
+      id: itemId,
+      reviewedBy,
+      notes: revisionNotes
+    });
+
+    return true;
+  }
+
+  /**
+   * Update content after revision
+   */
+  async updateContent(
+    itemId: string,
+    updatedContent: Partial<ReviewItem['content']>
+  ): Promise<boolean> {
+    const item = this.reviewQueue.find(item => item.id === itemId);
+    
+    if (!item || item.status !== 'needs_revision') {
+      logger.warn(`Review item not found or not in revision status: ${itemId}`);
+      return false;
+    }
+
+    // Update content
+    Object.assign(item.content, updatedContent);
+    item.status = 'pending';
+    item.submittedAt = new Date(); // Reset submission time
+
+    logger.info(`📝 Content updated after revision: ${item.content.title}`, {
+      id: itemId
+    });
+
+    return true;
   }
 
   /**
    * Get review statistics
    */
-  async getReviewStatistics(): Promise<ReviewMetrics> {
-    try {
-      const allItems = Array.from(this.reviewQueue.values());
-      return this.calculateReviewMetrics(allItems);
-    } catch (error) {
-      logger.error('Error getting review statistics:', error);
-      throw new AppError('Failed to get review statistics', 500);
+  getReviewStats(): {
+    pending: number;
+    approved: number;
+    rejected: number;
+    needsRevision: number;
+    avgQualityScore: number;
+    avgReviewTime: number; // in minutes
+  } {
+    const pending = this.reviewQueue.filter(item => item.status === 'pending').length;
+    const approved = this.reviewQueue.filter(item => item.status === 'approved').length + this.approvedContent.length;
+    const rejected = this.reviewQueue.filter(item => item.status === 'rejected').length;
+    const needsRevision = this.reviewQueue.filter(item => item.status === 'needs_revision').length;
+
+    const allItems = [...this.reviewQueue, ...this.approvedContent];
+    const avgQualityScore = allItems.length > 0
+      ? allItems.reduce((sum, item) => sum + item.qualityScore, 0) / allItems.length
+      : 0;
+
+    // Calculate average review time for reviewed items
+    const reviewedItems = allItems.filter(item => item.reviewedAt);
+    const avgReviewTime = reviewedItems.length > 0
+      ? reviewedItems.reduce((sum, item) => {
+          const reviewTime = item.reviewedAt!.getTime() - item.submittedAt.getTime();
+          return sum + (reviewTime / 1000 / 60); // Convert to minutes
+        }, 0) / reviewedItems.length
+      : 0;
+
+    return {
+      pending,
+      approved,
+      rejected,
+      needsRevision,
+      avgQualityScore,
+      avgReviewTime
+    };
+  }
+
+  /**
+   * Get review item by ID
+   */
+  async getReviewItem(itemId: string): Promise<ReviewItem | null> {
+    const queueItem = this.reviewQueue.find(item => item.id === itemId);
+    if (queueItem) return queueItem;
+
+    const approvedItem = this.approvedContent.find(item => item.id === itemId);
+    return approvedItem || null;
+  }
+
+  /**
+   * Clean up old items (older than 30 days)
+   */
+  async cleanupOldItems(): Promise<number> {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    
+    const initialQueueLength = this.reviewQueue.length;
+    const initialApprovedLength = this.approvedContent.length;
+
+    this.reviewQueue = this.reviewQueue.filter(item => 
+      item.status === 'pending' || item.submittedAt >= thirtyDaysAgo
+    );
+
+    this.approvedContent = this.approvedContent.filter(item =>
+      item.submittedAt >= thirtyDaysAgo
+    );
+
+    const cleanedCount = (initialQueueLength - this.reviewQueue.length) + 
+                        (initialApprovedLength - this.approvedContent.length);
+
+    if (cleanedCount > 0) {
+      logger.info(`🧹 Cleaned up ${cleanedCount} old review items`);
     }
+
+    return cleanedCount;
   }
 
   /**
    * Private helper methods
    */
-  private findReviewItemByContentId(contentId: string): ReviewQueueItem | undefined {
-    return Array.from(this.reviewQueue.values()).find(item => item.contentId === contentId);
+  private findReviewItemByContentId(contentId: string): ReviewItem | undefined {
+    return this.reviewQueue.find(item => item.content.id === contentId);
   }
 
   private async calculateQualityScore(content: GeneratedContent): Promise<QualityScore> {
@@ -490,7 +457,7 @@ export class AdminReviewService {
     logger.info(`Added content ${content.id} to fine-tuning dataset with quality rating ${metadata.qualityRating}`);
   }
 
-  private calculateReviewMetrics(items: ReviewQueueItem[]): ReviewMetrics {
+  private calculateReviewMetrics(items: ReviewItem[]): ReviewMetrics {
     const total = items.length;
     const pending = items.filter(item => item.status === 'pending').length;
     const approved = items.filter(item => item.status === 'approved').length;

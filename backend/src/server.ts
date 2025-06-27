@@ -28,6 +28,8 @@ import analyticsRoutes from "@/routes/analytics";
 import healthRoutes from "@/routes/health";
 import linkContentRoutes from "@/routes/link-content";
 import wordPressSitesRoutes from "@/routes/wordpress-sites";
+import wordPressMultiSiteRoutes from "@/routes/wordpress-multisite";
+import automationRoutes from "@/routes/automation";
 
 // Validate environment variables
 validateEnv();
@@ -108,6 +110,8 @@ app.use("/api/v1/publishing", publishingRoutes);
 app.use("/api/v1/analytics", analyticsRoutes);
 app.use("/api/v1/link-content", linkContentRoutes);
 app.use("/api/v1/wordpress-sites", wordPressSitesRoutes);
+app.use("/api/v1/wordpress-multisite", wordPressMultiSiteRoutes);
+app.use("/api/v1/automation", automationRoutes);
 
 // 404 handler
 app.use("*", (req, res) => {

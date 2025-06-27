@@ -28,6 +28,12 @@ router.get('/batch/:jobId/approved', authMiddleware, linkContentController.getAp
 router.post('/test-scrape', linkContentController.testScrape);
 router.get('/health', linkContentController.healthCheck);
 
+// Image Gallery Integration
+router.get('/image-categories', linkContentController.getImageCategories);
+router.get('/image-folders/:categorySlug', linkContentController.getImageFolders);
+router.get('/preview-images', linkContentController.previewImages);
+router.post('/generate-enhanced', linkContentController.generateEnhancedContent);
+
 // Removed unused endpoints
 
 export default router; 

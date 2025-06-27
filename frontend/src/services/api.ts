@@ -115,6 +115,15 @@ export const linkContentApi = {
     return response.data;
   },
 
+  // Generate enhanced content with images
+  generateEnhancedContent: async (request: any): Promise<GeneratedContent> => {
+    const response = await aiGenerationApi.post<ApiResponse<GeneratedContent>>('/link-content/generate-enhanced', { request });
+    if (!response.data.success) {
+      throw new Error(response.data.error?.message || 'Enhanced content generation failed');
+    }
+    return response.data.data!;
+  },
+
   // Health check
   healthCheck: async (): Promise<{ status: string; message: string }> => {
     const response = await api.get<ApiResponse<{ status: string; message: string }>>('/link-content/health');
@@ -156,5 +165,85 @@ if (import.meta.env.MODE === 'development') {
     debugApi.testConnection();
   }, 2000);
 }
+
+// WordPress Multi-site API
+export const wordpressMultiSiteApi = {
+  // Get all sites configuration
+  getSites: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/wordpress-multisite/sites`);
+    if (!response.ok) throw new Error('Failed to fetch sites');
+    return response.json();
+  },
+
+  // Test all site connections
+  testConnections: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/wordpress-multisite/test-connections`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error('Failed to test connections');
+    return response.json();
+  },
+
+  // Preview smart routing decision
+  previewRouting: async (content: { title: string; content: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/wordpress-multisite/preview-routing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(content),
+    });
+    if (!response.ok) throw new Error('Failed to preview routing');
+    return response.json();
+  },
+
+  // Cross-post to multiple sites
+  crossPost: async (data: { title: string; content: string; siteIds: string[] }) => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/wordpress-multisite/cross-post`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to cross-post');
+    return response.json();
+  },
+
+  // Smart publish with auto-routing
+  smartPublish: async (data: { 
+    title: string; 
+    content: string; 
+    targetSite?: string;
+    status?: 'publish' | 'draft' | 'pending';
+    categories?: string[];
+    tags?: string[];
+    contentType?: string;
+  }) => {
+    // Using axios instance for consistency and better error handling
+    const response = await api.post<ApiResponse<{
+      url: string;
+      siteName: string;
+      postId: number | string;
+    }>>('/wordpress-multisite/smart-publish', data);
+
+    if (!response.data.success) {
+      const errorMsg = response.data.error?.message || response.data.message || 'Failed to smart publish';
+      throw new Error(errorMsg);
+    }
+    
+    return response.data; // The whole data object is returned now { success, message, url, siteName, postId }
+  },
+
+  // Get publishing statistics
+  getStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/wordpress-multisite/stats`);
+    if (!response.ok) throw new Error('Failed to fetch stats');
+    return response.json();
+  },
+
+  // Check service health
+  checkHealth: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/wordpress-multisite/health`);
+    if (!response.ok) throw new Error('Failed to check health');
+    return response.json();
+  },
+};
 
 export default api; 

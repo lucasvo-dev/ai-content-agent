@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { 
   GlobeAltIcon, 
@@ -11,7 +11,10 @@ import {
   SparklesIcon,
   EyeIcon,
   ArrowPathIcon,
-  ClipboardDocumentIcon
+  ClipboardDocumentIcon,
+  CloudArrowUpIcon,
+  ChartBarIcon,
+  DocumentDuplicateIcon
 } from '@heroicons/react/24/outline';
 
 import { Button } from './ui/Button';
@@ -20,13 +23,15 @@ import { Input } from './ui/Input';
 import { Label } from './ui/Label';
 import { Badge } from './ui/Badge';
 import { Progress } from './ui/Progress';
-import { linkContentApi, aiApi } from '../services/api';
+import { linkContentApi, aiApi, wordpressMultiSiteApi } from '../services/api';
+import { photoGalleryApi, type PhotoGalleryCategory } from '../services/photoGalleryApi';
 
-// REDESIGNED: Simplified 3-step workflow based on UX best practices
+// ENHANCED: 4-step workflow with management
 const WORKFLOW_STEPS = [
   { id: 'urls', title: 'URLs & Crawler', icon: GlobeAltIcon, description: 'Input URLs and crawl content' },
   { id: 'settings', title: 'Content Settings', icon: CogIcon, description: 'Configure AI generation settings' },
   { id: 'generation', title: 'Generate & Review', icon: SparklesIcon, description: 'Generate and review content' },
+  { id: 'management', title: 'Content Management', icon: ChartBarIcon, description: 'Manage approved content & auto-generation' },
 ];
 
 // Simplified URL Item interface
@@ -53,6 +58,16 @@ interface LLMSettings {
   brandName: string;
   keywords: string;
   specialRequest: string;
+  // Image settings
+  includeImages: boolean;
+  imageSelection: 'category' | 'folder';
+  imageCategory: string;
+  specificFolder: string;
+  folderSuggestions?: string[];
+  maxImages: number | 'auto';
+  ensureConsistency: boolean;
+  // WordPress Multi-site settings
+  wordpressSiteTarget?: 'auto' | 'wedding' | 'yearbook' | 'general';
 }
 
 // Generated content interface
@@ -61,11 +76,14 @@ interface GeneratedContentItem {
   sourceUrl: string;
   title: string;
   body: string;
-  status: 'generating' | 'generated' | 'approved' | 'failed' | 'queued';
+  status: 'generating' | 'generated' | 'approved' | 'failed' | 'queued' | 'published';
   metadata?: {
     qualityScore: number;
     wordCount: number;
   };
+  publishedAt?: string;
+  publishedUrl?: string;
+  publishedSite?: string; // Thêm thông tin site đã publish
 }
 
 export function LinkContentWorkflow() {
@@ -87,23 +105,70 @@ export function LinkContentWorkflow() {
     brandName: '',
     keywords: '',
     specialRequest: '',
+    // Image settings
+    includeImages: true,
+    imageSelection: 'category',
+    imageCategory: '',
+    specificFolder: '',
+    folderSuggestions: [],
+    maxImages: 'auto',
+    ensureConsistency: true,
+    // WordPress Multi-site settings
+    wordpressSiteTarget: 'auto',
   });
 
   // Get crawled items
   const crawledItems = urlItems.filter(item => item.status === 'crawled');
   const totalProgress = ((currentStep + 1) / WORKFLOW_STEPS.length) * 100;
 
-  // Get approved content count for fine-tuning progress
+  // Get approved content count for fine-tuning progress (riêng cho từng WordPress site)
   const getApprovedContentStats = () => {
-    const approvedContent = JSON.parse(localStorage.getItem('approvedContent') || '[]');
-    return {
-      totalApproved: approvedContent.length,
-      readyForFineTuning: approvedContent.length >= 10, // Need 10+ approvals for fine-tuning
-      progress: Math.min(approvedContent.length / 10 * 100, 100)
-    };
+    try {
+      const currentSite = llmSettings.wordpressSiteTarget || 'auto';
+      const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
+      const siteApprovedContent = approvedContentBySite[currentSite] || [];
+      
+      console.log(`📊 Approved content for site "${currentSite}":`, siteApprovedContent);
+      
+      // Ensure we have an array
+      const validApprovedContent = Array.isArray(siteApprovedContent) ? siteApprovedContent : [];
+      
+      return {
+        totalApproved: validApprovedContent.length,
+        readyForFineTuning: validApprovedContent.length >= 10, // Need 10+ approvals for fine-tuning
+        progress: Math.min(validApprovedContent.length / 10 * 100, 100),
+        currentSite: currentSite
+      };
+    } catch (error) {
+      console.error('Error reading approved content:', error);
+      return {
+        totalApproved: 0,
+        readyForFineTuning: false,
+        progress: 0,
+        currentSite: llmSettings.wordpressSiteTarget || 'auto'
+      };
+    }
   };
 
   const approvedStats = getApprovedContentStats();
+
+  // Debug function to clear localStorage (cho site hiện tại)
+  const clearApprovedContent = () => {
+    const currentSite = llmSettings.wordpressSiteTarget || 'auto';
+    try {
+      const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
+      delete approvedContentBySite[currentSite];
+      localStorage.setItem('approvedContentBySite', JSON.stringify(approvedContentBySite));
+      
+      console.log(`🗑️ Cleared approved content for site "${currentSite}"`);
+      toast.success(`Approved content cleared for ${currentSite} site`);
+    } catch (error) {
+      console.error('Error clearing approved content:', error);
+      toast.error('Failed to clear approved content');
+    }
+    // Force re-render by updating state
+    setGeneratedContent(prev => [...prev]);
+  };
 
   // URL management functions
   const handleUrlChange = (id: string, url: string) => {
@@ -158,8 +223,6 @@ export function LinkContentWorkflow() {
     }
   };
 
-
-
   // REAL AI Integration - Call actual API like ContentGenerator
   const generateContentWithSettings = async (
     sourceItem: URLItem, 
@@ -185,107 +248,19 @@ export function LinkContentWorkflow() {
 
     const {
       contentType, 
-      language, 
       tone, 
       targetAudience, 
       brandName, 
       keywords, 
-      specialRequest
     } = settings;
 
-    let finalPrompt = '';
-
-    const wordpressPrompt = `You are an expert content writer specializing in WordPress blog content. Your task is to transform the 'SOURCE ARTICLE' into high-quality WordPress-ready content.
-
-### CRITICAL RULES (Follow Strictly):
-
-1.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for WordPress editor. Use proper HTML tags for structure and formatting. DO NOT include <html>, <head>, <body> tags - only provide the content HTML that goes directly into WordPress post editor.
-2.  **HTML STRUCTURE**:
-    - Use <h2> for main section titles
-    - Use <h3> for subsections
-    - Use <p> tags for all paragraphs
-    - Use <strong> for bolding important keywords
-    - Use <ul> and <li> for bullet points
-    - Use <ol> and <li> for numbered lists
-    - Use <blockquote> for quotes
-    - Use <br> sparingly, prefer proper paragraph tags
-    - DO NOT include any backticks, code blocks, or markdown syntax
-    - Content must be completely clean and ready for copy-paste to WordPress
-3.  **STRUCTURAL MIRRORING (MOST IMPORTANT)**: You MUST mirror the exact structure of the source article. If the source has 5 sections and 2 lists, your output MUST have the same.
-4.  **LENGTH REQUIREMENT (NON-NEGOTIABLE)**: The final article MUST contain at least 1000 words. COUNT EVERY WORD. This is MANDATORY and NON-NEGOTIABLE. If your output has fewer than 1000 words, it will be automatically rejected and you must try again. To meet this requirement:
-    - Expand each section with detailed explanations and examples
-    - Add comprehensive background information  
-    - Include practical tips and actionable advice
-    - Provide case studies or real-world applications
-    - Add thorough analysis and insights
-    - NEVER use filler content - every word must add value
-    - The 1000-word minimum is just the START - aim for 1500-2000 words for best results
-5.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
-6.  **CONTENT FIDELITY**: Base the content EXCLUSIVELY on the 'SOURCE ARTICLE'.
-7.  **COMPLETE REWRITING**: Rewrite every sentence. No verbatim copying.
-8.  **BRAND INTEGRATION**: Replace competing brands with "${brandName}".
-9.  **AUDIENCE/TONE**: Write for "${targetAudience}" with a ${tone} tone.
-10. **KEYWORD INTEGRATION (MANDATORY)**: You MUST strategically weave the following keywords throughout the article. They must be part of the natural sentence flow and not feel forced. Keywords: "${keywords}".
-11. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}
-
-### HTML FORMAT EXAMPLE:
-<h2>Main Section Title</h2>
-<p>This is a paragraph with <strong>important keywords</strong> highlighted properly for WordPress.</p>
-
-<h3>Subsection Title</h3>
-<p>Another paragraph with proper HTML formatting.</p>
-
-<ul>
-<li>Bullet point one with valuable information</li>
-<li>Bullet point two with additional details</li>
-</ul>
-
-<blockquote>
-<p>This is a quote or important statement formatted properly.</p>
-</blockquote>`;
-
-    const facebookPrompt = `You are an expert social media manager. Your task is to transform the 'SOURCE ARTICLE' into a highly engaging Facebook post.
-
-### CRITICAL RULES (Follow Strictly):
-
-1.  **HOOK**: Start with a compelling question or a bold statement to grab attention.
-2.  **READABILITY**: Use short paragraphs (1-3 sentences). Use line breaks to create white space.
-3.  **EMOJIS**: Sprinkle relevant emojis (2-4) throughout the post to make it visually appealing and convey emotion.
-4.  **VALUE**: Summarize the most important point from the source article in a clear and concise way.
-5.  **CALL-TO-ACTION (CTA)**: End with a clear CTA. Ask a question to encourage comments, or suggest clicking a link (you can use a placeholder like "[Link in Bio]").
-6.  **HASHTAGS**: Include 3-5 relevant hashtags at the end. Use a mix of broad and niche tags.
-7.  **LENGTH**: The entire post should be between 400 and 800 characters. DO NOT exceed this.
-8.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
-9.  **TONE**: Write for "${targetAudience}" with a ${tone} tone.
-10. **BRAND REPLACEMENT (MANDATORY)**: You MUST replace any brand name found in the source article with "${brandName}". This is a critical instruction. Do not mention the original brand.
-11. **KEYWORD INTEGRATION (MANDATORY)**: You MUST integrate the following keywords naturally into the body of the post. Do not just list them as hashtags. Keywords: "${keywords}".
-12. **SPECIAL INSTRUCTIONS**: ${specialRequest ? `Follow: "${specialRequest}"` : 'None.'}`;
-    
-    if (contentType === 'wordpress_blog') {
-      finalPrompt = wordpressPrompt;
-    } else { // facebook_post
-      finalPrompt = facebookPrompt;
-    }
-
-    const fullContext = `${finalPrompt}
-
-### SOURCE ARTICLE TO TRANSFORM:
----
-**Original Title:** ${sourceTitle}
-**Source URL:** ${sourceUrl}
-
-**Complete Source Content:**
-${sourceContent}
----
-
-### OUTPUT REQUIREMENTS:
-Provide ONLY the final content based on the specified format (HTML for WordPress, plain text with emojis for Facebook). Do not add any meta-commentary, explanations, or notes. The HTML should be ready for direct copy-paste into WordPress editor.`;
-
     try {
-      // Create content generation request with timeout
+      // The request object now sends raw data, not a pre-built prompt.
+      // The backend's HybridAIService will be responsible for building the prompt.
       const request = {
-        type: 'blog_post' as const, 
+        type: contentType === 'wordpress_blog' ? 'blog_post' as const : 'social_media' as const, 
         topic: sourceTitle,
+        context: sourceContent, // Send the raw crawled content as context
         targetAudience: targetAudience,
         keywords: keywords.split(',').map(k => k.trim()).filter(Boolean),
         brandVoice: {
@@ -293,9 +268,20 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
           style: 'conversational' as const,
           vocabulary: 'industry-specific' as const,
           length: 'detailed' as const,
+          brandName: brandName,
         },
-        context: fullContext,
         preferredProvider: settings.preferredProvider,
+        imageSettings: settings.includeImages ? {
+          includeImages: settings.includeImages,
+          imageSelection: sourceItem.imageFolder ? 'specific-folder' : settings.imageSelection,
+          imageCategory: settings.imageCategory,
+          specificFolder: sourceItem.imageFolder || settings.specificFolder,
+          maxImages: settings.maxImages,
+          ensureConsistency: settings.ensureConsistency,
+        } : undefined,
+        // Pass language and special request directly
+        language: settings.language,
+        specialInstructions: settings.specialRequest,
       };
 
       console.log(`🚀 Calling AI API (attempt ${retryCount + 1}/${maxRetries + 1}):`, { 
@@ -311,7 +297,13 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
         }, 90000); // 90 second client timeout
       });
 
-      const generatedContent = await Promise.race([
+      // Use enhanced content generation if images are included
+      const generatedContent = settings.includeImages 
+        ? await Promise.race([
+            linkContentApi.generateEnhancedContent(request),
+            timeoutPromise
+          ])
+        : await Promise.race([
         aiApi.generateContent(request),
         timeoutPromise
       ]);
@@ -452,84 +444,155 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
         : item
     ));
 
-    // Store approved content for future fine-tuning
+    // Store approved content for future fine-tuning (PREVENT DUPLICATES) - riêng cho từng site
+    const currentSite = llmSettings.wordpressSiteTarget || 'auto';
     const approvedData = {
       contentId,
       sourceUrl: content.sourceUrl,
-      originalTitle: content.title, // Use the actual content title
+      originalTitle: content.title,
       generatedTitle: content.title,
       generatedContent: content.body,
-      settings: llmSettings, // Use current LLM settings
+      settings: llmSettings,
       approvedAt: new Date().toISOString(),
       wordCount: content.metadata?.wordCount,
-      qualityScore: 'approved' // User approved indicates high quality
+      qualityScore: 'approved',
+      wordpressSite: currentSite
     };
 
-    // Store in localStorage for now (in production, this would go to backend for fine-tuning)
-    const existingApprovals = JSON.parse(localStorage.getItem('approvedContent') || '[]');
-    existingApprovals.push(approvedData);
-    localStorage.setItem('approvedContent', JSON.stringify(existingApprovals));
+    // Get approved content by site structure
+    const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
+    const existingApprovals = approvedContentBySite[currentSite] || [];
+    
+    // Enhanced duplicate detection with better logging
+    console.log(`🔍 Checking for duplicates in site "${currentSite}"...`);
+    console.log('Current contentId:', contentId);
+    console.log('Current sourceUrl:', content.sourceUrl);
+    console.log('Existing approvals for this site:', existingApprovals.length);
+    console.log('Existing contentIds:', existingApprovals.map((a: any) => a.contentId));
+    
+    // FIXED: Only check for exact contentId match, not sourceUrl
+    // This ensures each unique content generation is counted separately
+    const isDuplicate = existingApprovals.some((approval: any) => {
+      return approval.contentId === contentId;
+    });
 
-    console.log('✅ Content approved and stored for fine-tuning:', approvedData);
-    toast.success('Content approved! This will help improve future AI generations.');
+    if (!isDuplicate) {
+      // Add to site-specific approved content
+      existingApprovals.push(approvedData);
+      approvedContentBySite[currentSite] = existingApprovals;
+      localStorage.setItem('approvedContentBySite', JSON.stringify(approvedContentBySite));
+      
+      console.log(`✅ Content approved and stored for site "${currentSite}" (total for this site: ${existingApprovals.length})`);
+      console.log('Updated storage:', { currentSite, totalApprovals: existingApprovals.length });
+      toast.success(`Content approved for ${currentSite}! Total: ${existingApprovals.length}`);
+      
+      // Force UI update for approved stats with delay to ensure localStorage is updated
+      setTimeout(() => {
+        setGeneratedContent(prev => [...prev]);
+      }, 100); 
+    } else {
+      console.log(`ℹ️ Content already approved for site "${currentSite}", skipping duplicate storage`);
+      toast.success('Content approved! (already tracked for this site)');
+    }
   };
 
   const handleRegenerate = async (contentId: string) => {
-    const contentToRegenerate = generatedContent.find(c => c.id === contentId);
-    if (!contentToRegenerate) return;
+    const content = generatedContent.find(item => item.id === contentId);
+    if (!content) return;
 
-    const sourceItem = urlItems.find(item => item.url === contentToRegenerate.sourceUrl);
-    if (!sourceItem?.crawledContent) {
-      toast.error('Source content not found. Please re-crawl the URL first.');
-      return;
-    }
+    const sourceItem = urlItems.find(item => item.url === content.sourceUrl);
+    if (!sourceItem || !sourceItem.crawledContent) return;
 
     // Update status to generating
     setGeneratedContent(prev => prev.map(item => 
-      item.id === contentId 
-        ? { ...item, status: 'generating' as const, title: 'Regenerating content...', body: 'Creating new content with improved settings...' }
-        : item
+      item.id === contentId ? { ...item, status: 'generating' as const } : item
     ));
 
     try {
-      console.log('🔄 Regenerating content for:', contentToRegenerate.sourceUrl);
-      
-      // Generate new content with retry logic
-      const regeneratedData = await generateContentWithSettings(sourceItem, llmSettings);
+      const newContent = await generateContentWithSettings(sourceItem, llmSettings);
 
       setGeneratedContent(prev => prev.map(item => 
-        item.id === contentId ? {
+        item.id === contentId 
+          ? {
           ...item,
+              title: newContent.title,
+              body: newContent.body,
           status: 'generated' as const,
-          title: regeneratedData.title,
-          body: regeneratedData.body,
           metadata: {
-            qualityScore: regeneratedData.metadata?.qualityScore || 0,
-            wordCount: regeneratedData.metadata?.wordCount || 0
+                qualityScore: newContent.metadata?.qualityScore || 0,
+                wordCount: newContent.metadata?.wordCount || 0
           }
-        } : item
+            }
+          : item
       ));
 
-      const retryInfo = regeneratedData.metadata?.retryCount ? ` (${regeneratedData.metadata.retryCount + 1} attempts)` : '';
-      toast.success(`Content regenerated successfully!${retryInfo}`);
-      
+      toast.success('Content regenerated successfully!');
     } catch (error) {
-      console.error('❌ Regeneration failed:', error);
-      
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      
+      setGeneratedContent(prev => prev.map(item => 
+        item.id === contentId 
+          ? {
+              ...item,
+              status: 'failed' as const,
+              body: `Failed to regenerate: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }
+          : item
+      ));
+      toast.error('Failed to regenerate content');
+    }
+  };
+
+  const handlePublish = async (contentId: string) => {
+    const content = generatedContent.find(item => item.id === contentId);
+    if (!content) return;
+
+    // Only allow publishing approved content
+    if (content.status !== 'approved') {
+      toast.error('Please approve the content before publishing');
+      return;
+    }
+
+    try {
+      // Show loading state
+      toast.loading('Publishing to WordPress...', { id: 'publishing' });
+
+      // Prepare the publish data
+      const publishData = {
+        title: content.title,
+        content: content.body,
+        targetSiteId: llmSettings.wordpressSiteTarget === 'auto' ? undefined : llmSettings.wordpressSiteTarget,
+        status: 'publish' as const,
+        contentType: llmSettings.contentType,
+      };
+
+      // Call the smart publish API
+      const result = await wordpressMultiSiteApi.smartPublish(publishData);
+
+      if (result.success) {
+        // Update content status
       setGeneratedContent(prev => prev.map(item => 
         item.id === contentId 
           ? { 
               ...item, 
-              status: 'failed' as const, 
-              title: 'Regeneration Failed', 
-              body: `❌ Failed to regenerate content: ${errorMessage}\n\nYou can try regenerating again or check your AI provider settings.`
+                status: 'published' as const,
+                publishedAt: new Date().toISOString(),
+                publishedUrl: result.url || '',
+                publishedSite: result.siteName || ''
             }
           : item
       ));
       
-      toast.error(`Regeneration failed: ${errorMessage.split(':')[0]}`);
+        toast.success(`Published successfully to ${result.siteName}!`, { id: 'publishing' });
+        
+        // Open the published URL in a new tab
+        if (result.url) {
+          window.open(result.url, '_blank');
+        }
+      } else {
+        throw new Error(result.message || 'Publishing failed');
+      }
+    } catch (error) {
+      console.error('Publishing error:', error);
+      toast.error(`Failed to publish: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: 'publishing' });
     }
   };
 
@@ -542,8 +605,18 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
     if (!previewContent) return;
     
     try {
-      const contentToCopy = `${previewContent.title}\n\n${previewContent.body}`;
-      await navigator.clipboard.writeText(contentToCopy);
+      // Clean and prepare content
+      const cleanedBody = previewContent.body
+        .replace(/^```html\s*/i, '') // Remove ```html at start
+        .replace(/\s*```\s*$/i, '')   // Remove ``` at end
+        .replace(/&lt;/g, '<')        // Decode HTML entities
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"');
+      
+      // Copy clean HTML code (title + body HTML)
+      const htmlContent = `<h1>${previewContent.title}</h1>\n\n${cleanedBody}`;
+      await navigator.clipboard.writeText(htmlContent);
       setCopySuccess(true);
       
       // Reset success message after 2 seconds
@@ -608,9 +681,20 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
             onPreview={handlePreview}
             onApprove={handleApprove}
             onRegenerate={handleRegenerate}
+            onPublish={handlePublish}
             crawledItems={crawledItems}
             llmSettings={llmSettings}
             approvedStats={approvedStats}
+            onClearApprovedContent={clearApprovedContent}
+          />
+        );
+      case 3:
+        return (
+          <ManagementStep 
+            llmSettings={llmSettings}
+            approvedStats={approvedStats}
+            onClearApprovedContent={clearApprovedContent}
+            onSetPreviewContent={setPreviewContent}
           />
         );
       default:
@@ -699,22 +783,56 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-6 border-b">
-              <h2 className="text-xl font-semibold">Content Preview</h2>
+              <div>
+                <h2 className="text-xl font-semibold">Content Preview</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Hiển thị như trên WordPress • Copy để lấy HTML
+                </p>
+              </div>
               <Button variant="outline" onClick={closePreview}>
                 ✕
               </Button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div>
+              <div className="border-b pb-4">
                 <h3 className="text-lg font-medium text-gray-900">{previewContent.title}</h3>
                 <p className="text-sm text-gray-500 mt-1">Source: {previewContent.sourceUrl}</p>
               </div>
               
-              <div className="prose max-w-none">
-                <div className="whitespace-pre-wrap text-gray-700">
-                  {previewContent.body}
-                </div>
+              {/* Rendered HTML Content - WordPress Style */}
+              <div className="prose prose-lg max-w-none">
+                <div 
+                  className="wordpress-content"
+                  style={{
+                    lineHeight: '1.6',
+                    fontSize: '16px',
+                    color: '#333',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                  }}
+                  dangerouslySetInnerHTML={{ 
+                    __html: (() => {
+                      // Enhanced HTML cleaning for proper preview
+                      let cleanedContent = previewContent.body
+                        .replace(/^```html\s*/i, '') // Remove ```html at start
+                        .replace(/\s*```\s*$/i, '')   // Remove ``` at end
+                        .replace(/&lt;/g, '<')        // Decode HTML entities
+                        .replace(/&gt;/g, '>')
+                        .replace(/&amp;/g, '&')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#39;/g, "'")
+                        .replace(/&nbsp;/g, ' ');
+                      
+                      // Additional cleanup for artifacts
+                      cleanedContent = cleanedContent
+                        .replace(/^\s*`?html`?\s*/i, '') // Remove any remaining html artifacts
+                        .replace(/\s*`\s*$/i, '')         // Remove trailing backticks
+                        .trim();
+                      
+                      return cleanedContent;
+                    })()
+                  }}
+                />
               </div>
             </div>
             
@@ -730,7 +848,7 @@ Provide ONLY the final content based on the specified format (HTML for WordPress
                   className={copySuccess ? 'bg-green-50 border-green-200 text-green-700' : ''}
                 >
                   <ClipboardDocumentIcon className="w-4 h-4 mr-2" />
-                  {copySuccess ? 'Copied!' : 'Copy Content'}
+                  {copySuccess ? 'Copied HTML!' : 'Copy HTML'}
                 </Button>
                 <Button 
                   variant="outline"
@@ -766,7 +884,7 @@ function URLsStep({
   onUrlChange, 
   onAddUrl, 
   onRemoveUrl, 
-  onCrawlUrl 
+  onCrawlUrl
 }: {
   urlItems: URLItem[];
   onUrlChange: (id: string, url: string) => void;
@@ -883,29 +1001,110 @@ function SettingsStep({
   onSettingsChange: (settings: LLMSettings) => void;
   crawledItems: URLItem[];
 }) {
-  const updateSetting = (key: keyof LLMSettings, value: string) => {
+  const [categories, setCategories] = useState<PhotoGalleryCategory[]>([]);
+  const [folderSuggestions, setFolderSuggestions] = useState<string[]>([]);
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false);
+  const [folderSearchQuery, setFolderSearchQuery] = useState('');
+  const [showFolderDropdown, setShowFolderDropdown] = useState(false);
+  const folderDropdownRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    // Load photo gallery categories
+    photoGalleryApi.getCategories().then(setCategories).catch(console.error);
+  }, []);
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (folderDropdownRef.current && !folderDropdownRef.current.contains(event.target as Node)) {
+        setShowFolderDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+  
+  // Load folder suggestions when category changes
+  useEffect(() => {
+    if (llmSettings.imageSelection === 'folder' && llmSettings.imageCategory) {
+      console.log('🔍 Loading folders for category:', llmSettings.imageCategory);
+      loadFolderSuggestions(llmSettings.imageCategory);
+    }
+  }, [llmSettings.imageCategory, llmSettings.imageSelection]);
+  
+  const loadFolderSuggestions = async (categorySlug: string) => {
+    if (!categorySlug) return;
+    
+    console.log('📁 Fetching folders for category:', categorySlug);
+    setIsLoadingFolders(true);
+    setFolderSuggestions([]); // Clear previous suggestions
+    try {
+      // Use hardcoded localhost for development
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const apiUrl = `${baseUrl}/api/v1/link-content/image-folders/${categorySlug}`;
+      console.log('📁 API URL:', apiUrl);
+      
+      const response = await fetch(apiUrl);
+      const data = await response.json();
+      
+      console.log('📁 Folder API response:', data);
+      console.log('📁 Response status:', response.status);
+      console.log('📁 Response ok:', response.ok);
+      
+      if (data.success && data.data?.folders) {
+        setFolderSuggestions(data.data.folders);
+        console.log('📁 Loaded folders:', data.data.folders);
+        console.log('📁 Number of folders:', data.data.folders.length);
+      } else {
+        console.log('📁 No folders found in response:', {
+          success: data.success,
+          hasData: !!data.data,
+          hasFolders: !!data.data?.folders,
+          foldersLength: data.data?.folders?.length
+        });
+        setFolderSuggestions([]);
+      }
+    } catch (error) {
+      console.error('Failed to load folder suggestions:', error);
+      setFolderSuggestions([]);
+    } finally {
+      setIsLoadingFolders(false);
+    }
+  };
+  
+  const filteredFolders = folderSuggestions.filter(folder =>
+    folder.toLowerCase().includes(folderSearchQuery.toLowerCase())
+  );
+  
+  const updateSetting = (key: keyof LLMSettings, value: any) => {
     console.log('🔧 Settings Update Debug:');
     console.log('- Key:', key);
     console.log('- New Value:', value);
+    console.log('- Value Type:', typeof value);
     console.log('- Current Settings BEFORE:', JSON.stringify(llmSettings, null, 2));
+    
+    // Handle type conversions
+    let finalValue: any = value;
+    
+    if (key === 'includeImages' || key === 'ensureConsistency') {
+      // Convert string to boolean
+      finalValue = value === 'true' || value === true;
+    } else if (key === 'maxImages') {
+      // Convert string to number
+      finalValue = parseInt(value, 10);
+    }
     
     const newSettings: LLMSettings = { 
       ...llmSettings, 
-      [key]: value 
+      [key]: finalValue 
     };
     
     console.log('- Updated Settings AFTER:', JSON.stringify(newSettings, null, 2));
+    console.log('✅ Calling onSettingsChange with new settings');
     
-    // Force re-render with new settings
+    // Update the settings
     onSettingsChange(newSettings);
-    
-    // Verify state update after next render
-    setTimeout(() => {
-      console.log('✅ State verification after update:');
-      console.log('- Should be:', value);
-      console.log('- Current state:', llmSettings[key]);
-      console.log('- Settings object:', JSON.stringify(llmSettings, null, 2));
-    }, 200);
   };
 
   return (
@@ -998,6 +1197,31 @@ function SettingsStep({
                 <option value="english">🇸 English</option>
               </select>
             </div>
+
+            {/* WordPress Multi-site Selection */}
+            {llmSettings.contentType === 'wordpress_blog' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  WordPress Site Target
+                </label>
+                <select
+                  value={llmSettings.wordpressSiteTarget || 'auto'}
+                  onChange={(e) => {
+                    console.log('🌐 WordPress Site Target changing to:', e.target.value);
+                    updateSetting('wordpressSiteTarget', e.target.value as 'auto' | 'wedding' | 'yearbook' | 'general');
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="auto">🤖 Auto (AI chọn site phù hợp)</option>
+                  <option value="wedding">💍 Wedding.guustudio.vn (Cưới/Pre-wedding)</option>
+                  <option value="yearbook">🎓 Guukyyeu.vn (Kỷ yếu)</option>
+                  <option value="general">📸 Guustudio.vn (Ảnh khác)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  AI sẽ phân tích nội dung và tự động chọn site phù hợp nếu chọn Auto
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Right Column: Content Customization */}
@@ -1075,6 +1299,222 @@ function SettingsStep({
         </div>
       </div>
 
+      {/* Image Integration Settings */}
+      <Card className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+        <h4 className="font-semibold text-gray-900 mb-6 flex items-center">
+          <span className="mr-2">📸</span>
+          Image Integration Settings
+        </h4>
+        
+        <div className="space-y-4">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="includeImages"
+              checked={llmSettings.includeImages}
+              onChange={(e) => {
+                console.log('📸 Include Images:', e.target.checked);
+                updateSetting('includeImages', e.target.checked.toString());
+              }}
+              className="mr-2"
+            />
+            <label htmlFor="includeImages" className="text-sm font-medium">
+              Include images from Photo Gallery
+            </label>
+          </div>
+
+          {llmSettings.includeImages && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Image Selection Method
+                </label>
+                <select
+                  value={llmSettings.imageSelection}
+                  onChange={(e) => {
+                    console.log('🖼️ Image Selection Method:', e.target.value);
+                    updateSetting('imageSelection', e.target.value);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                >
+                  <option value="category">📂 Chọn Theo Category </option>
+                  <option value="folder">🎯 Chọn Folder Cụ Thể</option>
+                </select>
+              </div>
+
+              {llmSettings.imageSelection === 'category' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Chọn Category 
+                  </label>
+                  <select
+                    value={llmSettings.imageCategory}
+                    onChange={(e) => {
+                      console.log('📂 Image Category:', e.target.value);
+                      updateSetting('imageCategory', e.target.value);
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="">🔍 Tự chọn</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id || cat.category_slug} value={cat.category_slug || cat.id}>
+                        {(cat.category_name || cat.name || cat.category || 'Unnamed')} ({cat.folder_count || cat.count || 0} folders)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Hệ thống sẽ tự động chọn một folder ngẫu nhiên trong category này
+                  </p>
+                  
+                  {llmSettings.imageCategory && (
+                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
+                      <p className="text-xs text-amber-700">
+                        ⚠️ <strong>Chú ý:</strong> Hiện tại chỉ sử dụng ảnh thật từ Photo Gallery API.
+                        <br />
+                        Nếu không có featured images, content sẽ được tạo không có ảnh.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {llmSettings.imageSelection === 'folder' && (
+                <div className="space-y-2">
+                  <Label>Specific Folder</Label>
+                  <div className="relative" ref={folderDropdownRef}>
+                    <Input
+                      placeholder="Search for folder..."
+                      value={folderSearchQuery}
+                      onChange={(e) => {
+                        setFolderSearchQuery(e.target.value);
+                        setShowFolderDropdown(true);
+                      }}
+                      onFocus={() => setShowFolderDropdown(true)}
+                    />
+                    
+                    {showFolderDropdown && folderSuggestions.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                        {isLoadingFolders ? (
+                          <div className="p-3 text-sm text-gray-500">Loading folders...</div>
+                        ) : filteredFolders.length > 0 ? (
+                          filteredFolders.map((folder, index) => (
+                            <button
+                              key={index}
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+                              onClick={() => {
+                                updateSetting('specificFolder', folder);
+                                setFolderSearchQuery(folder);
+                                setShowFolderDropdown(false);
+                              }}
+                            >
+                              {folder}
+                            </button>
+                          ))
+                        ) : (
+                          <div className="p-3 text-sm text-gray-500">
+                            {folderSearchQuery ? 'No matching folders found' : 'No folders available - waiting for Photo Gallery team to add featured images'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {llmSettings.specificFolder && (
+                    <div className="text-sm text-green-600">
+                      ✓ Selected: {llmSettings.specificFolder}
+                    </div>
+                  )}
+                  
+                  {llmSettings.imageCategory && folderSuggestions.length === 0 && !isLoadingFolders && (
+                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
+                      <p className="text-xs text-amber-700">
+                        📁 No folders available for "{llmSettings.imageCategory}" category.
+                        <br />
+                        Content will be generated without images until Photo Gallery team adds featured images.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Số lượng ảnh
+                </label>
+                <select
+                  value={llmSettings.maxImages}
+                  onChange={(e) => {
+                    console.log('🔢 Max Images:', e.target.value);
+                    const value = e.target.value === 'auto' ? 'auto' : parseInt(e.target.value, 10);
+                    updateSetting('maxImages', value);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                >
+                  <option value="auto">🤖 Auto (để LLM tự quyết định)</option>
+                  <option value={0}>Không ảnh</option>
+                  <option value={1}>1 ảnh</option>
+                  <option value={2}>2 ảnh</option>
+                  <option value={3}>3 ảnh</option>
+                  <option value={4}>4 ảnh</option>
+                  <option value={5}>5 ảnh</option>
+                  <option value={6}>6 ảnh</option>
+                  <option value={7}>7 ảnh</option>
+                  <option value={8}>8 ảnh</option>
+                  <option value={9}>9 ảnh</option>
+                  <option value={10}>10 ảnh</option>
+                  <option value={12}>12 ảnh</option>
+                  <option value={15}>15 ảnh (tối đa)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {llmSettings.maxImages === 'auto' 
+                    ? 'LLM sẽ tự quyết định số lượng ảnh phù hợp với nội dung'
+                    : `LLM sẽ tính toán phân bổ ${llmSettings.maxImages} ảnh vào bài viết`
+                  }
+                </p>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="ensureConsistency"
+                  checked={llmSettings.ensureConsistency}
+                  onChange={(e) => {
+                    console.log('🔒 Ensure Consistency:', e.target.checked);
+                    updateSetting('ensureConsistency', e.target.checked.toString());
+                  }}
+                  className="mr-2"
+                />
+                <label htmlFor="ensureConsistency" className="text-sm">
+                  🔒 Đảm bảo tất cả ảnh từ cùng 1 album (khuyến nghị)
+                </label>
+              </div>
+
+              {llmSettings.imageSelection === 'category' && (
+                <div className="bg-blue-50 p-3 rounded-md">
+                  <p className="text-sm text-blue-800">
+                    <strong>💡 Real Images Only:</strong>
+                    <br />• Chọn category → Hệ thống tự động random 1 folder trong category
+                    <br />• Chỉ sử dụng ảnh thật từ Photo Gallery API
+                    <br />• Không có ảnh → Content sẽ tạo không có ảnh
+                  </p>
+                </div>
+              )}
+              
+              {llmSettings.imageSelection === 'folder' && (
+                <div className="bg-green-50 p-3 rounded-md">
+                  <p className="text-sm text-green-800">
+                    <strong>🎯 Real Images Only:</strong>
+                    <br />• Tìm kiếm chính xác folder cần dùng
+                    <br />• Chỉ sử dụng ảnh thật từ Photo Gallery API
+                    <br />• Không có ảnh → Content sẽ tạo không có ảnh
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Card>
+
       {/* Source Content Preview List */}
       <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
         <h4 className="font-semibold text-gray-900 mb-4 flex items-center">
@@ -1138,9 +1578,11 @@ function GenerationStep({
   onPreview,
   onApprove,
   onRegenerate,
+  onPublish,
   crawledItems,
   llmSettings,
-  approvedStats
+  approvedStats,
+  onClearApprovedContent
 }: { 
   generatedContent: GeneratedContentItem[];
   isGenerating: boolean;
@@ -1148,13 +1590,16 @@ function GenerationStep({
   onPreview: (contentId: string) => void;
   onApprove: (contentId: string) => void;
   onRegenerate: (contentId: string) => void;
+  onPublish: (contentId: string) => void;
   crawledItems: URLItem[];
   llmSettings: LLMSettings;
   approvedStats: {
     totalApproved: number;
     readyForFineTuning: boolean;
     progress: number;
+    currentSite: string;
   };
+  onClearApprovedContent: () => void;
 }) {
   return (
     <div className="space-y-6">
@@ -1201,12 +1646,42 @@ function GenerationStep({
               <span className="text-blue-700 font-medium text-xs uppercase tracking-wide">Special Request</span>
               <p className="text-blue-900 font-semibold text-sm">{llmSettings.specialRequest || 'None'}</p>
             </div>
+            {llmSettings.contentType === 'wordpress_blog' && (
+              <div className="bg-white p-3 rounded-lg border border-blue-100">
+                <span className="text-blue-700 font-medium text-xs uppercase tracking-wide">WordPress Site</span>
+                <p className="text-blue-900 font-semibold text-sm">
+                  {llmSettings.wordpressSiteTarget === 'auto' && '🤖 Auto'}
+                  {llmSettings.wordpressSiteTarget === 'wedding' && '💍 Wedding'}
+                  {llmSettings.wordpressSiteTarget === 'yearbook' && '🎓 Yearbook'}
+                  {llmSettings.wordpressSiteTarget === 'general' && '📸 General'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Fine-tuning Progress Display */}
         <div className="bg-green-50 border border-green-200 p-4 rounded-lg mb-4">
-          <h4 className="font-medium text-green-900 mb-2">🤖 AI Learning Progress</h4>
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h4 className="font-medium text-green-900">🤖 AI Learning Progress</h4>
+              <p className="text-xs text-green-600 mt-1">
+                Site: <span className="font-medium">{approvedStats.currentSite}</span>
+                {approvedStats.currentSite === 'auto' && ' (Auto-select)'}
+                {approvedStats.currentSite === 'wedding' && ' (💍 Wedding)'}
+                {approvedStats.currentSite === 'yearbook' && ' (🎓 Yearbook)'}
+                {approvedStats.currentSite === 'general' && ' (📸 General)'}
+              </p>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={onClearApprovedContent}
+              className="text-xs px-2 py-1 h-6"
+            >
+              🗑️ Clear
+            </Button>
+          </div>
           <div className="flex items-center justify-between text-sm">
             <div>
               <span className="text-green-700">Approved Content: </span>
@@ -1226,8 +1701,8 @@ function GenerationStep({
           </div>
           <p className="text-xs text-green-600 mt-2">
             {approvedStats.readyForFineTuning 
-              ? 'Great! You have enough approved content. Future feature: auto-generation without links!'
-              : `Approve ${10 - approvedStats.totalApproved} more pieces to unlock auto-generation feature.`}
+              ? `Great! You have enough approved content for "${approvedStats.currentSite}". Future feature: auto-generation without links!`
+              : `Approve ${10 - approvedStats.totalApproved} more pieces for "${approvedStats.currentSite}" to unlock auto-generation feature.`}
           </p>
         </div>
       </div>
@@ -1311,6 +1786,13 @@ function GenerationStep({
                         Preview
                       </Button>
                       <Button 
+                        size="sm"
+                        onClick={() => onPublish(content.id)}
+                      >
+                        <CloudArrowUpIcon className="w-4 h-4 mr-2" />
+                        Publish to WordPress
+                      </Button>
+                      <Button 
                         size="sm" 
                         variant="outline"
                         onClick={() => onRegenerate(content.id)}
@@ -1326,6 +1808,39 @@ function GenerationStep({
                       <span>Regenerating content...</span>
                     </div>
                   )}
+
+                  {content.status === 'published' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2 text-sm text-green-600">
+                        <CheckCircleIcon className="w-4 h-4" />
+                        <span>
+                          Published on {new Date(content.publishedAt!).toLocaleString('vi-VN')}
+                          {content.publishedSite && ` • ${content.publishedSite}`}
+                        </span>
+                      </div>
+                      {content.publishedUrl && (
+                        <div className="flex space-x-2">
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => window.open(content.publishedUrl, '_blank')}
+                            className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
+                          >
+                            <GlobeAltIcon className="w-4 h-4 mr-2" />
+                            Xem Bài Viết
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => onPreview(content.id)}
+                          >
+                            <EyeIcon className="w-4 h-4 mr-2" />
+                            Preview
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1337,6 +1852,235 @@ function GenerationStep({
 }
 
 // Status badge component
+function ManagementStep({ 
+  llmSettings,
+  approvedStats,
+  onClearApprovedContent,
+  onSetPreviewContent
+}: {
+  llmSettings: LLMSettings;
+  approvedStats: {
+    totalApproved: number;
+    readyForFineTuning: boolean;
+    progress: number;
+    currentSite: string;
+  };
+  onClearApprovedContent: () => void;
+  onSetPreviewContent: (content: GeneratedContentItem | null) => void;
+}) {
+  const [approvedContentList, setApprovedContentList] = React.useState<any[]>([]);
+  const [autoGenerationEnabled, setAutoGenerationEnabled] = React.useState(false);
+
+  // Load approved content cho site hiện tại
+  React.useEffect(() => {
+    try {
+      const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
+      const siteApprovedContent = approvedContentBySite[llmSettings.wordpressSiteTarget || 'auto'] || [];
+      setApprovedContentList(Array.isArray(siteApprovedContent) ? siteApprovedContent : []);
+    } catch (error) {
+      console.error('Failed to load approved content:', error);
+      setApprovedContentList([]);
+    }
+  }, [llmSettings.wordpressSiteTarget, approvedStats]);
+
+  const handleDeleteApprovedContent = (contentId: string) => {
+    try {
+      const currentSite = llmSettings.wordpressSiteTarget || 'auto';
+      const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
+      const siteApprovedContent = approvedContentBySite[currentSite] || [];
+      
+      // Remove the specific content
+      const updatedContent = siteApprovedContent.filter((item: any) => item.contentId !== contentId);
+      approvedContentBySite[currentSite] = updatedContent;
+      localStorage.setItem('approvedContentBySite', JSON.stringify(approvedContentBySite));
+      
+      setApprovedContentList(updatedContent);
+      toast.success('Approved content deleted');
+    } catch (error) {
+      console.error('Failed to delete approved content:', error);
+      toast.error('Failed to delete content');
+    }
+  };
+
+  const handlePreviewApproved = (content: any) => {
+    // Set preview content directly since we have all the data
+    const previewItem = {
+      id: content.contentId,
+      title: content.generatedTitle,
+      body: content.generatedContent,
+      sourceUrl: content.sourceUrl,
+      status: 'approved' as const,
+      metadata: {
+        qualityScore: 100,
+        wordCount: content.wordCount || 0
+      }
+    };
+    
+         // We need to trigger preview manually since this content might not be in generatedContent
+     onSetPreviewContent(previewItem);
+  };
+
+  const getSiteIcon = (siteId: string) => {
+    switch (siteId) {
+      case 'wedding': return '💒';
+      case 'yearbook': return '📚';
+      case 'general': return '🏢';
+      case 'auto': return '🤖';
+      default: return '📄';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold mb-2">Content Management & Auto-Generation</h3>
+        <p className="text-gray-600 mb-4">
+          Manage your approved content and configure auto-generation settings based on AI learning progress.
+        </p>
+      </div>
+
+      {/* AI Learning Progress Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <ChartBarIcon className="w-5 h-5" />
+            <span>AI Learning Progress</span>
+            <Badge variant="outline">
+              {getSiteIcon(approvedStats.currentSite)} {approvedStats.currentSite}
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium">Approved Content</span>
+              <span className="text-sm text-gray-600">{approvedStats.totalApproved}/10+</span>
+            </div>
+            <Progress value={approvedStats.progress} className="w-full h-2" />
+          </div>
+          
+          <div className={`p-4 rounded-lg ${approvedStats.readyForFineTuning ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'}`}>
+            {approvedStats.readyForFineTuning ? (
+              <div className="flex items-center space-x-2">
+                <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                <span className="font-medium text-green-800">Ready for Auto-Generation!</span>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <ClockIcon className="w-5 h-5 text-blue-600" />
+                <span className="font-medium text-blue-800">
+                  Need {10 - approvedStats.totalApproved} more approvals for auto-generation
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Auto-Generation Toggle */}
+          {approvedStats.readyForFineTuning && (
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p className="font-medium">Auto-Generation Mode</p>
+                <p className="text-sm text-gray-600">Enable automatic content generation based on learned patterns</p>
+              </div>
+              <label className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={autoGenerationEnabled}
+                  onChange={(e) => setAutoGenerationEnabled(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span className="text-sm">{autoGenerationEnabled ? 'Enabled' : 'Disabled'}</span>
+              </label>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Approved Content List */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <DocumentDuplicateIcon className="w-5 h-5" />
+              <span>Approved Content ({approvedContentList.length})</span>
+            </div>
+            <Button variant="outline" size="sm" onClick={onClearApprovedContent}>
+              Clear All
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {approvedContentList.length === 0 ? (
+            <div className="text-center py-8">
+              <DocumentDuplicateIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600">No approved content yet for this site</p>
+              <p className="text-sm text-gray-500 mt-2">Approve content in the Generation step to build training data</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {approvedContentList.map((content, index) => (
+                <div key={content.contentId} className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="flex-1">
+                    <h4 className="font-medium text-sm">{content.generatedTitle || 'Untitled'}</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Source: {content.sourceUrl}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      Approved: {new Date(content.approvedAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePreviewApproved(content)}
+                    >
+                      <EyeIcon className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDeleteApprovedContent(content.contentId)}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Future Auto-Generation Settings */}
+      {approvedStats.readyForFineTuning && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <SparklesIcon className="w-5 h-5" />
+              <span>Auto-Generation Settings</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="text-center p-6 bg-blue-50 rounded-lg">
+              <SparklesIcon className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+              <h4 className="font-medium text-blue-800 mb-2">Auto-Generation Ready!</h4>
+              <p className="text-sm text-blue-600">
+                With {approvedStats.totalApproved} approved pieces, the AI can now generate content automatically based on learned patterns.
+              </p>
+              <Button className="mt-4" disabled>
+                <SparklesIcon className="w-4 h-4 mr-2" />
+                Configure Auto-Generation (Coming Soon)
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const statusClasses = {
     generating: 'bg-yellow-100 text-yellow-800 animate-pulse',
@@ -1347,6 +2091,7 @@ function StatusBadge({ status }: { status: string }) {
     crawling: 'bg-yellow-100 text-yellow-800 animate-pulse',
     pending: 'bg-gray-100 text-gray-800',
     queued: 'bg-indigo-100 text-indigo-800',
+    published: 'bg-purple-100 text-purple-800',
   };
 
   const icons = {
@@ -1358,6 +2103,7 @@ function StatusBadge({ status }: { status: string }) {
     generated: CheckCircleIcon,
     approved: CheckCircleIcon,
     queued: ClockIcon,
+    published: CloudArrowUpIcon,
   };
 
   const Icon = icons[status as keyof typeof icons] || ClockIcon;
