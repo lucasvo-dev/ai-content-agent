@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies for backend
-RUN npm install --legacy-peer-deps
+RUN npm install
 
 # Copy the rest of the backend source code
 COPY . ./
@@ -28,7 +28,7 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/package-lock.json ./package-lock.json
 
 # Install only production dependencies
-RUN npm ci --omit=dev --legacy-peer-deps
+RUN npm ci --omit=dev
 
 # Install Playwright and browsers
 RUN npm install playwright@1.41.0
