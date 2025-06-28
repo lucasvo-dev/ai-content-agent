@@ -127,6 +127,16 @@ export class AdminReviewService {
   }
 
   /**
+   * Get review queue (alias for getPendingReview)
+   */
+  async getReviewQueue(options: ReviewQueueOptions = {}): Promise<{
+    items: ReviewItem[];
+    totalCount: number;
+  }> {
+    return this.getPendingReview(options);
+  }
+
+  /**
    * Get pending review items
    */
   async getPendingReview(options: ReviewQueueOptions = {}): Promise<{
@@ -240,6 +250,66 @@ export class AdminReviewService {
   }
 
   /**
+   * Bulk approve content items
+   */
+  async bulkApprove(
+    itemIds: string[],
+    reviewedBy: string,
+    options: BulkApprovalOptions = {}
+  ): Promise<ApprovalResult[]> {
+    const results: ApprovalResult[] = [];
+
+    for (const itemId of itemIds) {
+      try {
+        const success = await this.approveContent(itemId, reviewedBy, options.adminNotes);
+        results.push({
+          contentId: itemId,
+          success,
+          message: success ? 'Approved successfully' : 'Item not found',
+          status: success ? 'approved' : 'failed',
+          reviewedBy,
+          reviewedAt: new Date()
+        });
+      } catch (error) {
+        results.push({
+          contentId: itemId,
+          success: false,
+          message: error instanceof Error ? error.message : 'Unknown error',
+          status: 'failed'
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Edit content
+   */
+  async editContent(
+    itemId: string,
+    edits: Record<string, any>,
+    adminId: string
+  ): Promise<boolean> {
+    const item = this.reviewQueue.find(i => i.id === itemId) || 
+                this.approvedContent.find(i => i.id === itemId);
+    
+    if (!item) {
+      return false;
+    }
+
+    // Apply edits to content
+    if (edits.title) item.content.title = edits.title;
+    if (edits.body) item.content.body = edits.body;
+    if (edits.excerpt) item.content.excerpt = edits.excerpt;
+    if (edits.seoTitle) item.content.metadata.seoTitle = edits.seoTitle;
+    if (edits.seoDescription) item.content.metadata.seoDescription = edits.seoDescription;
+
+    logger.info(`📝 Content edited: ${item.content.title}`, { itemId, adminId });
+    return true;
+  }
+
+  /**
    * Update content after revision
    */
   async updateContent(
@@ -263,6 +333,26 @@ export class AdminReviewService {
     });
 
     return true;
+  }
+
+  /**
+   * Get review statistics (alias)
+   */
+  async getReviewStatistics(): Promise<ReviewMetrics> {
+    const stats = this.getReviewStats();
+    return {
+      totalPending: stats.pending,
+      totalApproved: stats.approved,
+      totalRejected: stats.rejected,
+      averageQualityScore: stats.avgQualityScore,
+      approvalRate: stats.approved / (stats.approved + stats.rejected + stats.pending) * 100 || 0,
+      averageReviewTime: stats.avgReviewTime,
+      totalItems: stats.pending + stats.approved + stats.rejected + stats.needsRevision,
+      pendingReview: stats.pending,
+      autoApproved: this.approvedContent.filter(item => item.autoApproved).length,
+      approved: stats.approved,
+      rejected: stats.rejected
+    };
   }
 
   /**

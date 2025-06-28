@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { HybridAIService } from '../services/HybridAIService.js';
-import type { ContentGenerationRequestType } from '../types/index.js';
+import type { ContentGenerationRequest } from '../types/index.js';
 
 export class AIController {
   private aiService: HybridAIService;

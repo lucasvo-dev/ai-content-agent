@@ -2,7 +2,8 @@ import { Request } from "express";
 
 // Re-export from content types
 export type { 
-  ContentGenerationRequest as ContentGenerationRequestType,
+  ContentGenerationRequest,
+  ContentType,
   BrandVoice,
   ContentAnalysisResult,
   ImprovementSuggestion
@@ -141,7 +142,7 @@ export interface BrandVoiceConfig {
 
 // Content generation types
 export interface ContentGenerationRequest {
-  type: ContentType;
+  type: 'blog_post' | 'social_media' | 'email' | 'ad_copy';
   topic: string;
   context?: string;
   targetAudience: string;
@@ -151,6 +152,7 @@ export interface ContentGenerationRequest {
   imageSettings?: ImageSettings;
   language?: 'english' | 'vietnamese';
   specialInstructions?: string;
+  requirements?: string;
 }
 
 export interface ImageSettings {

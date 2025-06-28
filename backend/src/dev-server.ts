@@ -12,7 +12,7 @@ import { logger } from './utils/logger.js';
 import { WordPressMultiSiteService } from './services/WordPressMultiSiteService.js';
 import axios from 'axios';
 import { ContentController } from './controllers/ContentController.js';
-import type { ContentGenerationRequestType } from './types/index.js';
+import type { ContentGenerationRequest } from './types/index.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -149,7 +149,7 @@ app.get('/api/v1/ai/templates', (req, res) => {
 // AI content generation endpoint
 app.post('/api/v1/ai/generate', async (req, res) => {
   try {
-    const request: ContentGenerationRequestType = req.body;
+    const request: ContentGenerationRequest = req.body;
     
     console.log('🎯 Content generation request:', {
       type: request.type,

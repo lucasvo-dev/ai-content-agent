@@ -1,7 +1,9 @@
 import { BrandVoiceConfig } from './index.js';
 
+export type ContentType = 'blog_post' | 'social_media' | 'email' | 'ad_copy';
+
 export interface ContentGenerationRequest {
-  type: 'blog_post' | 'social_media' | 'email' | 'ad_copy';
+  type: ContentType;
   topic: string;
   targetAudience: string;
   keywords: string[];
@@ -12,6 +14,9 @@ export interface ContentGenerationRequest {
   contentLength?: 'short' | 'medium' | 'long';
   projectId?: string;
   metadata?: Record<string, any>;
+  requirements?: string;
+  context?: string;
+  specialInstructions?: string;
 }
 
 export interface BrandVoice {
@@ -35,4 +40,5 @@ export interface ImprovementSuggestion {
   priority: 'high' | 'medium' | 'low';
   description: string;
   implementation: string;
+  impact?: string;
 } 
