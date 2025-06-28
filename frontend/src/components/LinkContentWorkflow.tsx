@@ -59,7 +59,6 @@ interface LLMSettings {
   brandName: string;
   keywords: string;
   specialRequest: string;
-  wordCount: number; // Add word count
   // Image settings
   includeImages: boolean;
   imageSelection: 'category' | 'folder';
@@ -70,8 +69,6 @@ interface LLMSettings {
   ensureConsistency: boolean;
   ensureAlbumConsistency: boolean; // NEW: Đảm bảo ảnh từ cùng 1 album
   preferPortrait: boolean; // NEW: Ưu tiên ảnh chân dung
-  // WordPress Multi-site settings  
-  wordpressSiteTarget?: 'wedding' | 'yearbook' | 'general';
 }
 
 // Generated content interface
@@ -82,13 +79,19 @@ interface GeneratedContentItem {
   body: string;
   status: 'generating' | 'generated' | 'approved' | 'failed' | 'queued' | 'published';
   metadata?: {
-    qualityScore: number;
-    wordCount: number;
+    qualityScore?: number;
     aiModel?: string;
   };
   publishedAt?: string;
   publishedUrl?: string;
   publishedSite?: string; // Thêm thông tin site đã publish
+}
+
+// WordPress Site interface
+interface WordPressSite {
+  id: string;
+  name: string;
+  url: string;
 }
 
 export function LinkContentWorkflow() {
@@ -100,6 +103,11 @@ export function LinkContentWorkflow() {
   const [previewContent, setPreviewContent] = useState<GeneratedContentItem | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   
+  // State for new UI controls
+  const [wordpressSites, setWordPressSites] = useState<WordPressSite[]>([]);
+  const [publishSiteSelections, setPublishSiteSelections] = useState<Record<string, string>>({});
+  const [regenProviderSelections, setRegenProviderSelections] = useState<Record<string, 'auto' | 'openai' | 'gemini' | 'claude'>>({});
+
   // Simplified settings with defaults
   const [llmSettings, setLlmSettings] = useState<LLMSettings>({
     contentType: 'wordpress_blog',
@@ -110,8 +118,6 @@ export function LinkContentWorkflow() {
     brandName: '',
     keywords: '',
     specialRequest: '',
-    wordCount: 1200, // Default word count
-    // Image settings
     includeImages: true,
     imageSelection: 'category',
     imageCategory: '',
@@ -119,11 +125,40 @@ export function LinkContentWorkflow() {
     folderSuggestions: [],
     maxImages: 'auto',
     ensureConsistency: true,
-    ensureAlbumConsistency: false, // NEW: Default false
-    preferPortrait: false, // NEW: Default false
-    // WordPress Multi-site settings
-    wordpressSiteTarget: 'wedding',
+    ensureAlbumConsistency: false,
+    preferPortrait: false,
   });
+
+  // Fetch WordPress sites on component mount
+  useEffect(() => {
+    const fetchSites = async () => {
+      try {
+        const sitesData = await wordpressMultiSiteApi.getSites();
+        console.log('🔧 WordPress Sites API Response:', sitesData);
+        
+        if (sitesData.success && sitesData.data) {
+          // API trả về structure: { success: true, data: { sites: [...] } }
+          const sites = sitesData.data.sites || sitesData.data;
+          
+          if (Array.isArray(sites)) {
+            console.log('✅ Found WordPress sites:', sites.length);
+            setWordPressSites(sites);
+          } else {
+            console.log('⚠️ Sites data is not an array:', sites);
+            setWordPressSites([]);
+          }
+        } else {
+          console.log('⚠️ API response unsuccessful or no data');
+          setWordPressSites([]);
+        }
+      } catch (error) {
+        console.error("❌ Failed to fetch WordPress sites:", error);
+        toast.error("Could not load WordPress sites.");
+        setWordPressSites([]);
+      }
+    };
+    fetchSites();
+  }, []);
 
   // Get crawled items
   const crawledItems = urlItems.filter(item => item.status === 'crawled');
@@ -133,20 +168,14 @@ export function LinkContentWorkflow() {
   // Get approved content count for fine-tuning progress (riêng cho từng WordPress site)
   const getApprovedContentStats = () => {
     try {
-      const currentSite = llmSettings.wordpressSiteTarget || 'auto';
-      const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
-      const siteApprovedContent = approvedContentBySite[currentSite] || [];
-      
-      console.log(`📊 Approved content for site "${currentSite}":`, siteApprovedContent);
-      
-      // Ensure we have an array
-      const validApprovedContent = Array.isArray(siteApprovedContent) ? siteApprovedContent : [];
+      const allApprovedContent = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
+      const totalCount = Object.values(allApprovedContent).flat().length;
       
       return {
-        totalApproved: validApprovedContent.length,
-        readyForFineTuning: validApprovedContent.length >= 10, // Need 10+ approvals for fine-tuning
-        progress: Math.min(validApprovedContent.length / 10 * 100, 100),
-        currentSite: currentSite
+        totalApproved: totalCount,
+        readyForFineTuning: totalCount >= 10,
+        progress: Math.min(totalCount / 10 * 100, 100),
+        currentSite: 'all_sites'
       };
     } catch (error) {
       console.error('Error reading approved content:', error);
@@ -154,7 +183,7 @@ export function LinkContentWorkflow() {
         totalApproved: 0,
         readyForFineTuning: false,
         progress: 0,
-        currentSite: llmSettings.wordpressSiteTarget || 'auto'
+        currentSite: 'all_sites'
       };
     }
   };
@@ -163,14 +192,10 @@ export function LinkContentWorkflow() {
 
   // Debug function to clear localStorage (cho site hiện tại)
   const clearApprovedContent = () => {
-    const currentSite = llmSettings.wordpressSiteTarget || 'auto';
     try {
-      const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
-      delete approvedContentBySite[currentSite];
-      localStorage.setItem('approvedContentBySite', JSON.stringify(approvedContentBySite));
-      
-      console.log(`🗑️ Cleared approved content for site "${currentSite}"`);
-      toast.success(`Approved content cleared for ${currentSite} site`);
+      localStorage.setItem('approvedContentBySite', '{}');
+      console.log(`🗑️ Cleared all approved content`);
+      toast.success(`All approved content cleared`);
     } catch (error) {
       console.error('Error clearing approved content:', error);
       toast.error('Failed to clear approved content');
@@ -289,7 +314,7 @@ export function LinkContentWorkflow() {
           brandName: brandName,
         },
         preferredProvider: settings.preferredProvider,
-        wordCount: settings.wordCount, // Pass word count
+        // wordCount removed - now handled automatically by AI based on content type
         imageSettings: settings.includeImages ? {
           includeImages: settings.includeImages,
           imageSelection: settings.imageSelection,
@@ -331,7 +356,6 @@ export function LinkContentWorkflow() {
       
       console.log('✅ AI API response:', {
         title: generatedContent.title?.substring(0, 50),
-        wordCount: generatedContent.metadata?.wordCount,
         provider: generatedContent.metadata?.provider,
         model: generatedContent.metadata?.aiModel
       });
@@ -343,7 +367,6 @@ export function LinkContentWorkflow() {
         metadata: {
           sourceTitle: sourceTitle,
           settings: settings,
-          wordCount: generatedContent.metadata?.wordCount,
           qualityScore: generatedContent.metadata?.seoScore,
           aiModel: generatedContent.metadata?.aiModel,
           retryCount: retryCount
@@ -422,7 +445,7 @@ export function LinkContentWorkflow() {
       title: sourceItem.crawledContent?.title || 'Queued for generation...',
       body: 'This item is waiting to be processed.',
       status: 'queued' as const,
-      metadata: { qualityScore: 0, wordCount: 0 }
+      metadata: { qualityScore: 0 }
     }));
     setGeneratedContent(initialJobs);
 
@@ -443,8 +466,7 @@ export function LinkContentWorkflow() {
               body: generatedData.body,
               status: 'generated' as const,
               metadata: {
-                qualityScore: generatedData.metadata?.qualityScore || 0,
-                wordCount: generatedData.metadata?.wordCount || 0
+                qualityScore: generatedData.metadata?.qualityScore || 0
               }
             } : item
           ));
@@ -489,12 +511,14 @@ export function LinkContentWorkflow() {
     // Update status to approved
     setGeneratedContent(prev => prev.map(item => 
       item.id === contentId 
-        ? { ...item, status: 'approved' as const, approvedAt: new Date().toISOString() }
+        ? { ...item, status: 'approved' as const }
         : item
     ));
 
-    // Store approved content for future fine-tuning (PREVENT DUPLICATES) - riêng cho từng site
-    const currentSite = llmSettings.wordpressSiteTarget || 'auto';
+    // Store approved content for future fine-tuning.
+    // NOTE: This uses a placeholder "general" site since we removed site selection from settings.
+    // This could be improved to associate with the *published* site later.
+    const siteKeyForApproval = 'general';
     const approvedData = {
       contentId,
       sourceUrl: content.sourceUrl,
@@ -503,49 +527,40 @@ export function LinkContentWorkflow() {
       generatedContent: content.body,
       settings: llmSettings,
       approvedAt: new Date().toISOString(),
-      wordCount: content.metadata?.wordCount,
+      // wordCount removed - handled automatically by AI
       qualityScore: 'approved',
-      wordpressSite: currentSite
+      wordpressSite: siteKeyForApproval,
     };
 
     // Get approved content by site structure
     const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
-    const existingApprovals = approvedContentBySite[currentSite] || [];
+    const existingApprovals = approvedContentBySite[siteKeyForApproval] || [];
     
-    // Enhanced duplicate detection with better logging
-    console.log(`🔍 Checking for duplicates in site "${currentSite}"...`);
-    console.log('Current contentId:', contentId);
-    console.log('Current sourceUrl:', content.sourceUrl);
-    console.log('Existing approvals for this site:', existingApprovals.length);
-    console.log('Existing contentIds:', existingApprovals.map((a: any) => a.contentId));
-    
-    // FIXED: Only check for exact contentId match, not sourceUrl
-    // This ensures each unique content generation is counted separately
-    const isDuplicate = existingApprovals.some((approval: any) => {
-      return approval.contentId === contentId;
-    });
+    const isDuplicate = existingApprovals.some((approval: any) => approval.contentId === contentId);
 
     if (!isDuplicate) {
       // Add to site-specific approved content
       existingApprovals.push(approvedData);
-      approvedContentBySite[currentSite] = existingApprovals;
+      approvedContentBySite[siteKeyForApproval] = existingApprovals;
       localStorage.setItem('approvedContentBySite', JSON.stringify(approvedContentBySite));
       
-      console.log(`✅ Content approved and stored for site "${currentSite}" (total for this site: ${existingApprovals.length})`);
-      console.log('Updated storage:', { currentSite, totalApprovals: existingApprovals.length });
-      toast.success(`Content approved for ${currentSite}! Total: ${existingApprovals.length}`);
+      console.log(`✅ Content approved and stored for site "${siteKeyForApproval}" (total: ${existingApprovals.length})`);
+      toast.success(`Content approved!`);
       
-      // Force UI update for approved stats with delay to ensure localStorage is updated
+      // Force UI update for approved stats
       setTimeout(() => {
         setGeneratedContent(prev => [...prev]);
       }, 100); 
     } else {
-      console.log(`ℹ️ Content already approved for site "${currentSite}", skipping duplicate storage`);
-      toast.success('Content approved! (already tracked for this site)');
+      console.log(`ℹ️ Content already approved, skipping duplicate storage`);
+      toast.success('Content approved!');
     }
   };
 
-  const handleRegenerate = async (contentId: string) => {
+  const handleRegenerate = async (
+    contentId: string, 
+    provider: 'auto' | 'openai' | 'gemini' | 'claude'
+  ) => {
     const content = generatedContent.find(item => item.id === contentId);
     if (!content) return;
 
@@ -558,10 +573,15 @@ export function LinkContentWorkflow() {
     ));
 
     try {
-      // IMPORTANT: Use the LATEST settings, not captured closure values
-      console.log('🔄 Regenerating with current settings:', llmSettings);
+      // Use the LATEST settings, but override the provider for this regeneration
+      const regenSettings = {
+        ...llmSettings,
+        preferredProvider: provider,
+      };
       
-      const newContent = await generateContentWithSettings(sourceItem, llmSettings);
+      console.log(`🔄 Regenerating with provider "${provider}":`, regenSettings);
+      
+      const newContent = await generateContentWithSettings(sourceItem, regenSettings);
 
       setGeneratedContent(prev => prev.map(item => 
         item.id === contentId 
@@ -571,8 +591,7 @@ export function LinkContentWorkflow() {
               body: newContent.body,
           status: 'generated' as const,
           metadata: {
-                qualityScore: newContent.metadata?.qualityScore || 0,
-                wordCount: newContent.metadata?.wordCount || 0
+                qualityScore: newContent.metadata?.qualityScore || 0
           }
             }
           : item
@@ -593,25 +612,23 @@ export function LinkContentWorkflow() {
     }
   };
 
-  const handlePublish = async (contentId: string) => {
+  const handlePublish = async (contentId: string, targetSiteId: string) => {
     const content = generatedContent.find(item => item.id === contentId);
     if (!content) return;
 
-    // Only allow publishing approved content
-    if (content.status !== 'approved') {
-      toast.error('Please approve the content before publishing');
+    if (!targetSiteId) {
+      toast.error('Please select a WordPress site to publish to.');
       return;
     }
 
     try {
-      // Show loading state
-      toast.loading('Publishing to WordPress...', { id: 'publishing' });
+      toast.loading(`Publishing to site...`, { id: `publishing-${contentId}` });
 
       // Prepare the publish data
       const publishData = {
         title: content.title,
         content: content.body,
-        targetSiteId: llmSettings.wordpressSiteTarget,
+        targetSiteId: targetSiteId,
         status: 'publish' as const,
         contentType: llmSettings.contentType,
       };
@@ -633,7 +650,7 @@ export function LinkContentWorkflow() {
           : item
       ));
       
-        toast.success(`Published successfully to ${result.data?.siteName || 'site'}!`, { id: 'publishing' });
+        toast.success(`Published successfully to ${result.data?.siteName || 'site'}!`, { id: `publishing-${contentId}` });
         
         // Open the published URL in a new tab
         if (result.data?.url) {
@@ -644,13 +661,12 @@ export function LinkContentWorkflow() {
       }
     } catch (error) {
       console.error('Publishing error:', error);
-      toast.error(`Failed to publish: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: 'publishing' });
+      toast.error(`Failed to publish: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: `publishing-${contentId}` });
     }
   };
 
   const closePreview = () => {
     setPreviewContent(null);
-    setCopySuccess(false);
   };
 
   const handleCopyContent = async () => {
@@ -684,7 +700,7 @@ export function LinkContentWorkflow() {
   const canGoNext = () => {
     switch (currentStep) {
       case 0: return crawledItems.length > 0; // URLs step
-      case 1: return llmSettings.targetAudience.trim() && llmSettings.brandName.trim(); // Settings step
+      case 1: return true; // Settings step fields are now optional
       case 2: return true; // Generation step (always can navigate)
       default: return false;
     }
@@ -718,12 +734,12 @@ export function LinkContentWorkflow() {
         );
       case 1:
         return (
-                      <SettingsStep 
-              llmSettings={llmSettings} 
-              onSettingsChange={setLlmSettings}
-              crawledItems={crawledItems}
-              currentLanguage="vietnamese"
-            />
+          <SettingsStep 
+            llmSettings={llmSettings} 
+            onSettingsChange={setLlmSettings}
+            crawledItems={crawledItems}
+            currentLanguage="vietnamese"
+          />
         );
       case 2:
         return (
@@ -740,6 +756,11 @@ export function LinkContentWorkflow() {
             approvedStats={approvedStats}
             onClearApprovedContent={clearApprovedContent}
             onSettingsChange={setLlmSettings}
+            wordpressSites={wordpressSites}
+            publishSiteSelections={publishSiteSelections}
+            setPublishSiteSelections={setPublishSiteSelections}
+            regenProviderSelections={regenProviderSelections}
+            setRegenProviderSelections={setRegenProviderSelections}
           />
         );
       case 3:
@@ -917,39 +938,67 @@ export function LinkContentWorkflow() {
               </div>
             </div>
             
-            <div className="border-t p-6 flex justify-between">
+            <div className="border-t p-6 flex justify-between items-center">
               <Button variant="outline" onClick={closePreview}>
                 Close
               </Button>
               
-              <div className="flex space-x-3">
-                <Button 
-                  variant="outline"
-                  onClick={handleCopyContent}
-                  className={copySuccess ? 'bg-green-50 border-green-200 text-green-700' : ''}
-                >
-                  <ClipboardDocumentIcon className="w-4 h-4 mr-2" />
-                  {copySuccess ? 'Copied HTML!' : 'Copy HTML'}
-                </Button>
-                <Button 
-                  variant="outline"
-                  onClick={() => {
-                    handleRegenerate(previewContent.id);
-                    closePreview();
-                  }}
-                >
-                  <ArrowPathIcon className="w-4 h-4 mr-2" />
-                  Regenerate
-                </Button>
-                <Button 
-                  onClick={() => {
-                    handleApprove(previewContent.id);
-                    closePreview();
-                  }}
-                >
-                  <CheckCircleIcon className="w-4 h-4 mr-2" />
-                  Approve Content
-                </Button>
+              <div className="flex items-center space-x-4">
+                {/* Regenerate with Provider Selection */}
+                <div className="flex items-center space-x-2">
+                  <select
+                    value={regenProviderSelections[previewContent.id] || 'auto'}
+                    onChange={(e) => setRegenProviderSelections(prev => ({
+                      ...prev,
+                      [previewContent.id]: e.target.value as any
+                    }))}
+                    className="text-sm px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="auto">🤖 Auto</option>
+                    <option value="claude">🎭 Claude</option>
+                    <option value="openai">🧠 OpenAI</option>
+                    <option value="gemini">⚡ Gemini</option>
+                  </select>
+                  <Button 
+                    variant="outline"
+                    onClick={() => {
+                      handleRegenerate(previewContent.id, regenProviderSelections[previewContent.id] || 'auto');
+                      closePreview();
+                    }}
+                  >
+                    <ArrowPathIcon className="w-4 h-4 mr-2" />
+                    Regenerate
+                  </Button>
+                </div>
+
+                {/* Publish with Site Selection */}
+                <div className="flex items-center space-x-2">
+                  <select
+                    value={publishSiteSelections[previewContent.id] || ''}
+                    onChange={(e) => setPublishSiteSelections(prev => ({
+                      ...prev,
+                      [previewContent.id]: e.target.value
+                    }))}
+                    className="text-sm px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="" disabled>Select a site...</option>
+                    {wordpressSites.map(site => (
+                      <option key={site.id} value={site.id}>
+                        {site.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Button 
+                    onClick={() => {
+                      handlePublish(previewContent.id, publishSiteSelections[previewContent.id]);
+                      closePreview();
+                    }}
+                    disabled={!publishSiteSelections[previewContent.id]}
+                  >
+                    <CloudArrowUpIcon className="w-4 h-4 mr-2" />
+                    Publish to WordPress
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -1269,20 +1318,7 @@ function SettingsStep({
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Word Count ({llmSettings.wordCount} words)
-              </label>
-              <input
-                type="range"
-                min="500"
-                max="3000"
-                step="100"
-                value={llmSettings.wordCount}
-                onChange={(e) => updateSetting('wordCount', parseInt(e.target.value, 10))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              />
-            </div>
+            
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1300,30 +1336,6 @@ function SettingsStep({
                 <option value="english">🇬🇧 English</option>
               </select>
             </div>
-
-            {/* WordPress Multi-site Selection */}
-            {llmSettings.contentType === 'wordpress_blog' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Target WordPress Site
-                </label>
-                <select
-                  value={llmSettings.wordpressSiteTarget || 'wedding'}
-                  onChange={(e) => {
-                    console.log('🌐 WordPress Site Target changing to:', e.target.value);
-                    updateSetting('wordpressSiteTarget', e.target.value as 'wedding' | 'yearbook' | 'general');
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                  <option value="wedding">💍 Wedding.guustudio.vn (Wedding/Pre-wedding)</option>
-                  <option value="yearbook">🎓 Guukyyeu.vn (Yearbook)</option>
-                  <option value="general">📸 Guustudio.vn (Other Photos)</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Choose the site that matches your content type
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Right Column: Content Customization */}
@@ -1782,15 +1794,20 @@ function GenerationStep({
   llmSettings,
   approvedStats,
   onClearApprovedContent,
-  onSettingsChange
+  onSettingsChange,
+  wordpressSites,
+  publishSiteSelections,
+  setPublishSiteSelections,
+  regenProviderSelections,
+  setRegenProviderSelections,
 }: { 
   generatedContent: GeneratedContentItem[];
   isGenerating: boolean;
   onGenerate: () => void;
   onPreview: (contentId: string) => void;
   onApprove: (contentId: string) => void;
-  onRegenerate: (contentId: string) => void;
-  onPublish: (contentId: string) => void;
+  onRegenerate: (contentId: string, provider: 'auto' | 'openai' | 'gemini' | 'claude') => void;
+  onPublish: (contentId: string, targetSiteId: string) => void;
   crawledItems: URLItem[];
   llmSettings: LLMSettings;
   approvedStats: {
@@ -1801,6 +1818,11 @@ function GenerationStep({
   };
   onClearApprovedContent: () => void;
   onSettingsChange: (settings: LLMSettings) => void;
+  wordpressSites: WordPressSite[];
+  publishSiteSelections: Record<string, string>;
+  setPublishSiteSelections: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  regenProviderSelections: Record<string, 'auto' | 'openai' | 'gemini' | 'claude'>;
+  setRegenProviderSelections: React.Dispatch<React.SetStateAction<Record<string, 'auto' | 'openai' | 'gemini' | 'claude'>>>;
 }) {
   return (
     <div className="space-y-6">
@@ -1847,16 +1869,6 @@ function GenerationStep({
               <span className="text-blue-700 font-medium text-xs uppercase tracking-wide">Special Request</span>
               <p className="text-blue-900 font-semibold text-sm">{llmSettings.specialRequest || 'None'}</p>
             </div>
-            {llmSettings.contentType === 'wordpress_blog' && (
-              <div className="bg-white p-3 rounded-lg border border-blue-100">
-                <span className="text-blue-700 font-medium text-xs uppercase tracking-wide">WordPress Site</span>
-                <p className="text-blue-900 font-semibold text-sm">
-                  {llmSettings.wordpressSiteTarget === 'wedding' && '💍 Wedding'}
-                  {llmSettings.wordpressSiteTarget === 'yearbook' && '🎓 Yearbook'}
-                  {llmSettings.wordpressSiteTarget === 'general' && '📸 General'}
-                </p>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1866,11 +1878,7 @@ function GenerationStep({
             <div>
               <h4 className="font-medium text-green-900">🤖 AI Learning Progress</h4>
               <p className="text-xs text-green-600 mt-1">
-                Site: <span className="font-medium">{approvedStats.currentSite}</span>
-                {approvedStats.currentSite === 'auto' && ' (Auto-select)'}
-                {approvedStats.currentSite === 'wedding' && ' (💍 Wedding)'}
-                {approvedStats.currentSite === 'yearbook' && ' (🎓 Yearbook)'}
-                {approvedStats.currentSite === 'general' && ' (📸 General)'}
+                Total Approved Content: <span className="font-medium">{approvedStats.totalApproved}</span>
               </p>
             </div>
             <Button 
@@ -1948,57 +1956,77 @@ function GenerationStep({
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {content.status === 'generated' && (
-                    <div className="flex space-x-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => onPreview(content.id)}
-                      >
-                        <EyeIcon className="w-4 h-4 mr-2" />
-                        Preview
-                      </Button>
-                      <Button 
-                        size="sm"
-                        onClick={() => onApprove(content.id)}
-                      >
-                        <CheckCircleIcon className="w-4 h-4 mr-2" />
-                        Approve
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => onRegenerate(content.id)}
-                      >
-                        Regenerate
-                      </Button>
-                    </div>
-                  )}
-
-                  {content.status === 'approved' && (
-                    <div className="flex space-x-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => onPreview(content.id)}
-                      >
-                        <EyeIcon className="w-4 h-4 mr-2" />
-                        Preview
-                      </Button>
-                      <Button 
-                        size="sm"
-                        onClick={() => onPublish(content.id)}
-                      >
-                        <CloudArrowUpIcon className="w-4 h-4 mr-2" />
-                        Publish to WordPress
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => onRegenerate(content.id)}
-                      >
-                        Regenerate
-                      </Button>
+                  {(content.status === 'generated' || content.status === 'approved') && (
+                    <div className="space-y-3">
+                       <div className="flex items-center space-x-2">
+                          <Button 
+                            size="sm"
+                            variant={content.status === 'approved' ? 'primary' : 'outline'}
+                            onClick={() => onApprove(content.id)}
+                            className={content.status === 'approved' ? 'bg-blue-600 hover:bg-blue-700' : ''}
+                          >
+                            <CheckCircleIcon className="w-4 h-4 mr-2" />
+                            {content.status === 'approved' ? 'Approved' : 'Approve'}
+                          </Button>
+                           <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => onPreview(content.id)}
+                          >
+                            <EyeIcon className="w-4 h-4 mr-2" />
+                            Preview
+                          </Button>
+                       </div>
+                       
+                       <div className="flex items-end space-x-2 pt-2 border-t">
+                         {/* Publish Controls */}
+                         <div className="flex-1">
+                           <Label className="text-xs text-gray-500">Publish to</Label>
+                           <div className="flex items-center space-x-2">
+                              <select
+                                value={publishSiteSelections[content.id] || ''}
+                                onChange={(e) => setPublishSiteSelections(prev => ({...prev, [content.id]: e.target.value}))}
+                                className="w-full text-xs px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                              >
+                                <option value="" disabled>Select site...</option>
+                                {wordpressSites.map(site => (
+                                  <option key={site.id} value={site.id}>{site.name}</option>
+                                ))}
+                              </select>
+                              <Button
+                                size="sm"
+                                onClick={() => onPublish(content.id, publishSiteSelections[content.id])}
+                                disabled={!publishSiteSelections[content.id]}
+                              >
+                                <CloudArrowUpIcon className="w-4 h-4" />
+                              </Button>
+                           </div>
+                         </div>
+                         
+                         {/* Regenerate Controls */}
+                         <div className="flex-1">
+                           <Label className="text-xs text-gray-500">Regenerate with</Label>
+                           <div className="flex items-center space-x-2">
+                              <select
+                                value={regenProviderSelections[content.id] || 'auto'}
+                                onChange={(e) => setRegenProviderSelections(prev => ({...prev, [content.id]: e.target.value as any}))}
+                                className="w-full text-xs px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                              >
+                                <option value="auto">🤖 Auto</option>
+                                <option value="claude">🎭 Claude</option>
+                                <option value="openai">🧠 OpenAI</option>
+                                <option value="gemini">⚡ Gemini</option>
+                              </select>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onRegenerate(content.id, regenProviderSelections[content.id] || 'auto')}
+                              >
+                                <ArrowPathIcon className="w-4 h-4" />
+                              </Button>
+                           </div>
+                         </div>
+                       </div>
                     </div>
                   )}
 
@@ -2060,7 +2088,7 @@ function GenerationStep({
                         <div className="flex space-x-2">
                           <Button 
                             size="sm"
-                            onClick={() => onRegenerate(content.id)}
+                            onClick={() => onRegenerate(content.id, llmSettings.preferredProvider)}
                             className="bg-red-600 hover:bg-red-700 text-white"
                           >
                             <ArrowPathIcon className="w-4 h-4 mr-2" />
@@ -2080,7 +2108,7 @@ function GenerationStep({
                                 ...llmSettings,
                                 preferredProvider: alternativeProvider as 'auto' | 'openai' | 'gemini' | 'claude'
                               });
-                              setTimeout(() => onRegenerate(content.id), 100);
+                              setTimeout(() => onRegenerate(content.id, alternativeProvider), 100);
                             }}
                           >
                             <ArrowsRightLeftIcon className="w-4 h-4 mr-2" />
@@ -2126,30 +2154,34 @@ function ManagementStep({
   const [approvedContentList, setApprovedContentList] = React.useState<any[]>([]);
   const [autoGenerationEnabled, setAutoGenerationEnabled] = React.useState(false);
 
-  // Load approved content cho site hiện tại
+  // Load approved content from all sites
   React.useEffect(() => {
     try {
       const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
-      const siteApprovedContent = approvedContentBySite[llmSettings.wordpressSiteTarget || 'auto'] || [];
-      setApprovedContentList(Array.isArray(siteApprovedContent) ? siteApprovedContent : []);
+      const allApproved = Object.values(approvedContentBySite).flat();
+      setApprovedContentList(Array.isArray(allApproved) ? allApproved : []);
     } catch (error) {
       console.error('Failed to load approved content:', error);
       setApprovedContentList([]);
     }
-  }, [llmSettings.wordpressSiteTarget, approvedStats]);
+  }, [approvedStats]);
 
   const handleDeleteApprovedContent = (contentId: string) => {
     try {
-      const currentSite = llmSettings.wordpressSiteTarget || 'auto';
       const approvedContentBySite = JSON.parse(localStorage.getItem('approvedContentBySite') || '{}');
-      const siteApprovedContent = approvedContentBySite[currentSite] || [];
       
-      // Remove the specific content
-      const updatedContent = siteApprovedContent.filter((item: any) => item.contentId !== contentId);
-      approvedContentBySite[currentSite] = updatedContent;
+      // Find and remove the specific content from whichever site it belongs to
+      for (const siteKey in approvedContentBySite) {
+        const siteContent = approvedContentBySite[siteKey];
+        const initialLength = siteContent.length;
+        approvedContentBySite[siteKey] = siteContent.filter((item: any) => item.contentId !== contentId);
+        if (approvedContentBySite[siteKey].length < initialLength) {
+          break; // Found and removed, exit loop
+        }
+      }
+      
       localStorage.setItem('approvedContentBySite', JSON.stringify(approvedContentBySite));
-      
-      setApprovedContentList(updatedContent);
+      setApprovedContentList(prev => prev.filter(item => item.contentId !== contentId));
       toast.success('Approved content deleted');
     } catch (error) {
       console.error('Failed to delete approved content:', error);
@@ -2201,7 +2233,7 @@ function ManagementStep({
             <ChartBarIcon className="w-5 h-5" />
             <span>AI Learning Progress</span>
             <Badge variant="info">
-              {getSiteIcon(approvedStats.currentSite)} {approvedStats.currentSite}
+              Total Approved: {approvedStats.totalApproved}
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -2224,7 +2256,7 @@ function ManagementStep({
               <div className="flex items-center space-x-2">
                 <ClockIcon className="w-5 h-5 text-blue-600" />
                 <span className="font-medium text-blue-800">
-                  Need {10 - approvedStats.totalApproved} more approvals for auto-generation
+                  Need {Math.max(0, 10 - approvedStats.totalApproved)} more approvals for auto-generation
                 </span>
               </div>
             )}
@@ -2268,7 +2300,7 @@ function ManagementStep({
           {approvedContentList.length === 0 ? (
             <div className="text-center py-8">
               <DocumentDuplicateIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600">No approved content yet for this site</p>
+              <p className="text-gray-600">No approved content yet</p>
               <p className="text-sm text-gray-500 mt-2">Approve content in the Generation step to build training data</p>
             </div>
           ) : (

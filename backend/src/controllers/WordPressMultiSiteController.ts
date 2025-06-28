@@ -136,9 +136,11 @@ export class WordPressMultiSiteController {
     res.json({
       success: true,
       message: `Successfully published to ${result.totalPublished} site(s).`,
-      url: result.mainResult?.link, // The URL of the published post
-      siteName: result.mainResult?.siteName,
-      postId: result.mainResult?.id
+      data: {
+        url: result.mainResult?.url, // The URL of the published post
+        siteName: result.mainResult?.siteName,
+        postId: result.mainResult?.postId
+      }
     });
   });
 
