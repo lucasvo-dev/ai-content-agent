@@ -8,6 +8,8 @@ const requiredEnvVars = [
   "SUPABASE_SERVICE_ROLE_KEY",
   "JWT_SECRET",
   "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "CLAUDE_API_KEY",
   "REDIS_URL",
 ] as const;
 
@@ -77,7 +79,9 @@ export function validateEnv(): EnvConfig {
     JWT_SECRET: process.env.JWT_SECRET || "development-secret-key",
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "15m",
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || "placeholder-openai-key",
-    OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4-turbo-preview",
+    OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4o",
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY || "placeholder-gemini-key",
+    CLAUDE_API_KEY: process.env.CLAUDE_API_KEY || "placeholder-claude-key",
     REDIS_URL: process.env.REDIS_URL || "redis://localhost:6379",
     // SSO Configuration - handle optional properties
     GOOGLE_CLIENT_ID: process.env['GOOGLE_CLIENT_ID'],
@@ -110,7 +114,9 @@ export const config: EnvConfig = {
   JWT_SECRET: process.env.JWT_SECRET || "development-secret-key",
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "15m",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "placeholder-openai-key",
-  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4-turbo-preview",
+  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4o",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "placeholder-gemini-key",
+  CLAUDE_API_KEY: process.env.CLAUDE_API_KEY || "placeholder-claude-key",
   REDIS_URL: process.env.REDIS_URL || "redis://localhost:6379",
   // SSO Configuration - handle optional properties
   GOOGLE_CLIENT_ID: process.env['GOOGLE_CLIENT_ID'],

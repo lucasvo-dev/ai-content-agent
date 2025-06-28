@@ -100,11 +100,83 @@ export class AIController {
 
     } catch (error) {
       console.error('Content generation failed:', error);
-      res.status(500).json({
+      
+      // Parse error details for better user feedback
+      const errorMessage = error instanceof Error ? error.message : 'Content generation failed';
+      let errorCode = 'AI_GENERATION_ERROR';
+      let statusCode = 500;
+      let details = '';
+      let suggestions: string[] = [];
+      
+      // Analyze error message for specific issues
+      if (errorMessage.includes('quota') || errorMessage.includes('429')) {
+        errorCode = 'QUOTA_EXCEEDED';
+        statusCode = 429;
+        details = 'AI provider quota has been exceeded';
+        suggestions = [
+          'Wait a few minutes and try again',
+          'Switch to a different AI provider',
+          'For OpenAI: Check your billing and add credits',
+          'For Gemini: Wait until quota resets (daily limit: 1,500 requests)'
+        ];
+      } else if (errorMessage.includes('rate limit')) {
+        errorCode = 'RATE_LIMITED';
+        statusCode = 429;
+        details = 'Too many requests in a short time';
+        suggestions = [
+          'Wait 1-2 minutes before trying again',
+          'Reduce the frequency of requests'
+        ];
+      } else if (errorMessage.includes('API key') || errorMessage.includes('authentication')) {
+        errorCode = 'AUTH_ERROR';
+        statusCode = 401;
+        details = 'AI provider authentication failed';
+        suggestions = [
+          'Check your API keys in environment variables',
+          'Ensure API keys are valid and active'
+        ];
+      } else if (errorMessage.includes('timeout')) {
+        errorCode = 'TIMEOUT_ERROR';
+        statusCode = 504;
+        details = 'Request timed out';
+        suggestions = [
+          'Try again with a shorter content request',
+          'Check your internet connection'
+        ];
+      } else if (errorMessage.includes('No AI providers available')) {
+        errorCode = 'NO_PROVIDERS';
+        statusCode = 503;
+        details = 'No AI providers are configured or available';
+        suggestions = [
+          'Check your environment variables for API keys',
+          'Ensure at least one AI provider is configured'
+        ];
+      }
+      
+      // Extract provider-specific error info
+      const providerErrors: any = {};
+      if (errorMessage.includes('Primary') && errorMessage.includes('Alternative')) {
+        const primaryMatch = errorMessage.match(/Primary \(([^)]+)\): ([^.]+)/);
+        const altMatch = errorMessage.match(/Alternative \(([^)]+)\): ([^.]+)/);
+        
+        if (primaryMatch) {
+          providerErrors[primaryMatch[1]] = primaryMatch[2].trim();
+        }
+        if (altMatch) {
+          providerErrors[altMatch[1]] = altMatch[2].trim();
+        }
+      }
+      
+      res.status(statusCode).json({
         success: false,
         error: {
-          code: 'AI_GENERATION_ERROR',
-          message: error instanceof Error ? error.message : 'Content generation failed',
+          code: errorCode,
+          message: 'Content generation failed',
+          details: details || errorMessage,
+          providerErrors: Object.keys(providerErrors).length > 0 ? providerErrors : undefined,
+          suggestions,
+          canRetry: errorCode === 'RATE_LIMITED' || errorCode === 'TIMEOUT_ERROR',
+          retryAfter: errorCode === 'RATE_LIMITED' ? 60 : undefined, // seconds
         },
         timestamp: new Date().toISOString(),
       });
@@ -311,52 +383,100 @@ export class AIController {
 
   /**
    * Regenerate content with new parameters
-   * POST /api/v1/ai/regenerate/:contentId
+   * POST /api/v1/ai/regenerate
    */
   async regenerateContent(req: Request, res: Response): Promise<void> {
     try {
       console.log('📞 AI Regenerate endpoint called');
       
-      const { contentId } = req.params;
       const regenerationParams = req.body;
 
-      if (!contentId) {
+      // Validate required fields
+      if (!regenerationParams.type || !regenerationParams.topic) {
         res.status(400).json({
           success: false,
           error: {
             code: 'VALIDATION_ERROR',
-            message: 'Content ID is required',
+            message: 'Missing required fields: type, topic',
           },
         });
         return;
       }
 
-      // For now, return a placeholder response
-      // In a real implementation, you would:
-      // 1. Fetch the original content
-      // 2. Apply the new parameters
-      // 3. Regenerate with Gemini
-      
+      // Create a new generation request with updated parameters
+      const request: ContentGenerationRequest = {
+        type: regenerationParams.type,
+        topic: regenerationParams.topic,
+        targetAudience: regenerationParams.targetAudience || 'General audience',
+        keywords: regenerationParams.keywords || [],
+        brandVoice: regenerationParams.brandVoice || {
+          tone: 'professional',
+          style: 'conversational',
+          vocabulary: 'simple',
+          length: 'medium'
+        },
+        context: regenerationParams.context,
+        preferredProvider: regenerationParams.preferredProvider || 'auto',
+        language: regenerationParams.language || 'vietnamese',
+        specialInstructions: regenerationParams.specialInstructions || 'Please create fresh, unique content different from previous versions.',
+      };
+
+      // Add retry instruction to special instructions
+      if (request.specialInstructions) {
+        request.specialInstructions += ' This is a regeneration request - please ensure the content is different from previous versions.';
+      }
+
+      // Generate new content
+      const generatedContent = await this.aiService.generateContent(request);
+
       res.json({
         success: true,
-        data: {
-          contentId,
-          status: 'regeneration_queued',
-          message: 'Content regeneration has been queued with Gemini Flash',
-          estimatedTime: '30 seconds',
-          newParameters: regenerationParams,
-        },
-        message: 'Content regeneration initiated',
+        data: generatedContent,
+        message: `Content regenerated successfully with ${generatedContent.metadata.provider}`,
+        regenerated: true,
         timestamp: new Date().toISOString(),
       });
 
     } catch (error) {
       console.error('Content regeneration failed:', error);
-      res.status(500).json({
+      
+      // Use same error handling as generateContent
+      const errorMessage = error instanceof Error ? error.message : 'Content regeneration failed';
+      let errorCode = 'AI_REGENERATION_ERROR';
+      let statusCode = 500;
+      let details = '';
+      let suggestions: string[] = [];
+      
+      // Analyze error message for specific issues
+      if (errorMessage.includes('quota') || errorMessage.includes('429')) {
+        errorCode = 'QUOTA_EXCEEDED';
+        statusCode = 429;
+        details = 'AI provider quota has been exceeded';
+        suggestions = [
+          'Wait a few minutes and try again',
+          'Try switching to a different AI provider in the request',
+          'For OpenAI: Check your billing and add credits',
+          'For Gemini: Wait until quota resets (daily limit: 1,500 requests)'
+        ];
+      } else if (errorMessage.includes('rate limit')) {
+        errorCode = 'RATE_LIMITED';
+        statusCode = 429;
+        details = 'Too many requests in a short time';
+        suggestions = [
+          'Wait 1-2 minutes before trying again',
+          'Reduce the frequency of regeneration requests'
+        ];
+      }
+      
+      res.status(statusCode).json({
         success: false,
         error: {
-          code: 'AI_REGENERATION_ERROR',
-          message: error instanceof Error ? error.message : 'Content regeneration failed',
+          code: errorCode,
+          message: 'Content regeneration failed',
+          details: details || errorMessage,
+          suggestions,
+          canRetry: true,
+          retryAfter: errorCode === 'RATE_LIMITED' ? 60 : undefined,
         },
         timestamp: new Date().toISOString(),
       });

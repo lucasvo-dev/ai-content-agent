@@ -3,15 +3,15 @@ import { WebScrapingService } from './WebScrapingService';
 import { HybridAIService } from './HybridAIService';
 import { EnhancedContentService } from './EnhancedContentService';
 import { logger } from '../utils/logger';
-import { ContentType, ContentStatus } from '../types';
+import { ContentType, ContentStatus } from '../types/index';
 import type { 
   BatchJob, 
   ContentWorkflowItem, 
-  ScrapingResult,
-  ContentGenerationRequest,
   GeneratedContent,
-  BrandVoiceConfig
+  BrandVoiceConfig,
+  ScrapingResult
 } from '../types';
+import { ContentGenerationRequest } from '../types/index.js';
 
 export interface CreateBatchJobRequest {
   projectId: string;
@@ -257,55 +257,54 @@ export class LinkBasedContentService {
         throw new Error('No scraped content available');
       }
 
-      logger.info(`Generating content for item ${item.id}`);
+      logger.info(`Generating content with images for item ${item.id}`);
 
-             // Prepare content generation request
-       const generationRequest: any = {
-         topic: item.scrapedContent.title,
-         type: settings.contentType,
-         brandVoice: settings.brandVoice,
-         targetAudience: settings.targetAudience,
-         keywords: [], // Could extract from scraped content
-         requirements: {
-           wordCount: '800-1200',
-           includeImages: false,
-           seoOptimized: true,
-           tone: settings.brandVoice.tone
-         },
-         preferredProvider: settings.preferredProvider
-       };
-
-      // Add scraped content as context
-      const contextPrompt = `
-Original content from ${item.sourceUrl}:
+      // Prepare enhanced content generation request (same as generateEnhancedContent)
+      const generationRequest: ContentGenerationRequest = {
+        type: (settings.contentType as ContentType) || ContentType.BLOG_POST,
+        topic: settings.topic || item.scrapedContent.title,
+        targetAudience: settings.targetAudience || 'General audience',
+        keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],
+        brandVoice: {
+          tone: settings.brandVoice?.tone || 'professional',
+          style: settings.brandVoice?.style || 'conversational',
+          vocabulary: settings.brandVoice?.vocabulary || 'industry-specific',
+          length: settings.brandVoice?.length || 'detailed',
+          brandName: settings.brandName || 'Your Brand'
+        },
+        context: `Original content from ${item.sourceUrl}:
 Title: ${item.scrapedContent.title}
 Content: ${item.scrapedContent.content.substring(0, 1000)}...
 
-Please create new content based on this source material.`;
+Please create new content based on this source material.`,
+        preferredProvider: settings.preferredProvider || 'auto',
+        language: settings.language || 'vietnamese',
+        imageSettings: settings.imageSettings || {
+          includeImages: true,
+          imageSelection: 'auto-category',
+          imageCategory: 'wedding',
+          maxImages: 3,
+          ensureConsistency: true
+        },
+        specialInstructions: 'This is a regeneration request - please ensure the content is different from previous versions.'
+      };
 
-      const result = await this.aiService.generateContent({
-        ...generationRequest,
-        topic: generationRequest.topic + '\n\nContext:\n' + contextPrompt
-      });
+      // Use EnhancedContentService to generate content with images (DRY principle)
+      const result = await this.enhancedContentService.generateContentWithImages(generationRequest);
 
-             item.generatedContent = {
-         title: result.title,
-         body: result.body,
-         excerpt: result.excerpt,
-         metadata: {
-           keywords: result.keywords || [],
-           readingTime: Math.ceil((result.wordCount || result.body.split(' ').length) / 200)
-         },
-         qualityScore: result.metadata?.qualityScore || 85,
-         seoTitle: result.metadata?.seoTitle || result.title,
-         seoDescription: result.metadata?.seoDescription || result.excerpt,
-         keywords: result.keywords || [],
-         wordCount: result.wordCount || result.body.split(' ').length,
-         aiProvider: result.aiProvider || 'unknown'
-       };
+      item.generatedContent = {
+        ...result,
+        status: ContentStatus.DRAFT,
+        sourceReference: {
+          url: item.sourceUrl,
+          title: item.scrapedContent.title,
+          usedAsReference: true,
+          rewriteStyle: 'improved'
+        }
+      };
 
       item.status = 'generated';
-      logger.info(`Successfully generated content for item ${item.id}`);
+      logger.info(`Successfully generated content with images for item ${item.id}, ${result.metadata?.wordCount || 0} words`);
 
     } catch (error) {
       item.status = 'failed';
@@ -519,12 +518,6 @@ Please create new content based on this source material.`;
           style: settings.brandVoice?.style || 'conversational',
           vocabulary: settings.brandVoice?.vocabulary || 'industry-specific',
           length: settings.brandVoice?.length || 'detailed'
-        },
-        requirements: {
-          wordCount: settings.requirements?.wordCount || undefined,
-          includeHeadings: settings.requirements?.includeHeadings ?? true,
-          includeCTA: settings.requirements?.includeCTA ?? true,
-          seoOptimized: settings.requirements?.seoOptimized ?? true
         },
         context: this.buildEnhancedContext(settings, item.scrapedContent, referenceContent),
         preferredProvider: settings.preferredProvider || 'auto'

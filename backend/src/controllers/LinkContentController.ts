@@ -1,20 +1,22 @@
-import { Request, Response } from 'express';
-import { LinkBasedContentService, CreateBatchJobRequest } from '../services/LinkBasedContentService';
-import { WebScrapingService } from '../services/WebScrapingService';
-import { PhotoGalleryService } from '../services/PhotoGalleryService';
-import { EnhancedContentService } from '../services/EnhancedContentService';
-import { asyncHandler } from '../utils/asyncHandler';
-import { logger } from '../utils/logger';
-import type { BrandVoiceConfig } from '../types';
+import { Request, Response } from "express";
+import { LinkBasedContentService, CreateBatchJobRequest } from "../services/LinkBasedContentService";
+import { WebScrapingService } from "../services/WebScrapingService";
+import { PhotoGalleryService } from "../services/PhotoGalleryService";
+import { EnhancedContentService } from "../services/EnhancedContentService";
+import { asyncHandler } from "../utils/asyncHandler";
+import { logger } from "../utils/logger";
+import type { BrandVoiceConfig } from "../types";
+import { ContentGenerationRequest } from "../types/index";
+import { ContentType } from "../types/index";
 
 /**
  * Controller for Link-Based Content Generation
  */
 export class LinkContentController {
-  private linkContentService: LinkBasedContentService;
-  private webScrapingService: WebScrapingService;
-  private photoGalleryService: PhotoGalleryService;
-  private enhancedContentService: EnhancedContentService;
+  private readonly linkContentService: LinkBasedContentService;
+  private readonly webScrapingService: WebScrapingService;
+  private readonly photoGalleryService: PhotoGalleryService;
+  private readonly enhancedContentService: EnhancedContentService;
 
   constructor() {
     this.linkContentService = new LinkBasedContentService();
@@ -35,20 +37,20 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Missing required fields: projectId and urls'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Missing required fields: projectId and urls",
+        },
       });
       return;
     }
 
-    if (!settings || !settings.contentType || !settings.brandVoice) {
+    if (!settings?.contentType || !settings.brandVoice) {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Missing content settings'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Missing content settings",
+        },
       });
       return;
     }
@@ -60,9 +62,9 @@ export class LinkContentController {
         settings: {
           contentType: settings.contentType,
           brandVoice: settings.brandVoice as BrandVoiceConfig,
-          targetAudience: settings.targetAudience || 'General audience',
-          preferredProvider: settings.preferredProvider || 'auto'
-        }
+          targetAudience: settings.targetAudience || "General audience",
+          preferredProvider: settings.preferredProvider || "auto",
+        },
       };
 
       const batchJob = await this.linkContentService.createBatchJob(request);
@@ -72,17 +74,17 @@ export class LinkContentController {
       res.status(201).json({
         success: true,
         data: batchJob,
-        message: 'Batch job created successfully'
+        message: "Batch job created successfully",
       });
 
     } catch (error) {
-      logger.error('Error creating batch job:', error);
+      logger.error("Error creating batch job:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to create batch job'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to create batch job",
+        },
       });
     }
   });
@@ -98,9 +100,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID is required",
+        },
       });
       return;
     }
@@ -112,9 +114,9 @@ export class LinkContentController {
         res.status(404).json({
           success: false,
           error: {
-            code: 'NOT_FOUND',
-            message: 'Batch job not found'
-          }
+            code: "NOT_FOUND",
+            message: "Batch job not found",
+          },
         });
         return;
       }
@@ -122,17 +124,17 @@ export class LinkContentController {
       res.json({
         success: true,
         data: status,
-        message: 'Batch job status retrieved successfully'
+        message: "Batch job status retrieved successfully",
       });
 
     } catch (error) {
-      logger.error('Error getting batch job status:', error);
+      logger.error("Error getting batch job status:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to get batch job status'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to get batch job status",
+        },
       });
     }
   });
@@ -148,9 +150,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID is required",
+        },
       });
       return;
     }
@@ -163,17 +165,17 @@ export class LinkContentController {
 
       res.json({
         success: true,
-        message: 'Crawling started successfully'
+        message: "Crawling started successfully",
       });
 
     } catch (error) {
-      logger.error('Error starting crawling:', error);
+      logger.error("Error starting crawling:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to start crawling'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to start crawling",
+        },
       });
     }
   });
@@ -189,9 +191,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID is required",
+        },
       });
       return;
     }
@@ -204,17 +206,17 @@ export class LinkContentController {
 
       res.json({
         success: true,
-        message: 'Content generation started successfully'
+        message: "Content generation started successfully",
       });
 
     } catch (error) {
-      logger.error('Error starting content generation:', error);
+      logger.error("Error starting content generation:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to start content generation'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to start content generation",
+        },
       });
     }
   });
@@ -231,9 +233,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID is required",
+        },
       });
       return;
     }
@@ -242,24 +244,24 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Content generation settings are required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Content generation settings are required",
+        },
       });
       return;
     }
 
     try {
       // Validate settings structure
-      const requiredFields = ['contentType', 'brandVoice', 'targetAudience'];
+      const requiredFields = ["contentType", "brandVoice", "targetAudience"];
       for (const field of requiredFields) {
         if (!settings[field]) {
           res.status(400).json({
             success: false,
             error: {
-              code: 'VALIDATION_ERROR',
-              message: `Missing required setting: ${field}`
-            }
+              code: "VALIDATION_ERROR",
+              message: `Missing required setting: ${field}`,
+            },
           });
           return;
         }
@@ -272,17 +274,17 @@ export class LinkContentController {
 
       res.json({
         success: true,
-        message: 'Enhanced content generation started successfully'
+        message: "Enhanced content generation started successfully",
       });
 
     } catch (error) {
-      logger.error('Error starting enhanced content generation:', error);
+      logger.error("Error starting enhanced content generation:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to start enhanced content generation'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to start enhanced content generation",
+        },
       });
     }
   });
@@ -298,9 +300,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID and Item ID are required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID and Item ID are required",
+        },
       });
       return;
     }
@@ -310,17 +312,17 @@ export class LinkContentController {
 
       res.json({
         success: true,
-        message: 'Content item approved successfully'
+        message: "Content item approved successfully",
       });
 
     } catch (error) {
-      logger.error('Error approving content item:', error);
+      logger.error("Error approving content item:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to approve content item'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to approve content item",
+        },
       });
     }
   });
@@ -336,9 +338,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID and Item ID are required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID and Item ID are required",
+        },
       });
       return;
     }
@@ -351,17 +353,17 @@ export class LinkContentController {
 
       res.json({
         success: true,
-        message: 'Content regeneration started successfully'
+        message: "Content regeneration started successfully",
       });
 
     } catch (error) {
-      logger.error('Error starting content regeneration:', error);
+      logger.error("Error starting content regeneration:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to start content regeneration'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to start content regeneration",
+        },
       });
     }
   });
@@ -377,9 +379,9 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Job ID is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Job ID is required",
+        },
       });
       return;
     }
@@ -391,19 +393,19 @@ export class LinkContentController {
         success: true,
         data: {
           items: approvedItems,
-          count: approvedItems.length
+          count: approvedItems.length,
         },
-        message: 'Approved content retrieved successfully'
+        message: "Approved content retrieved successfully",
       });
 
     } catch (error) {
-      logger.error('Error getting approved content:', error);
+      logger.error("Error getting approved content:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to get approved content'
-        }
+          code: "INTERNAL_ERROR",
+          message: "Failed to get approved content",
+        },
       });
     }
   });
@@ -419,16 +421,16 @@ export class LinkContentController {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'URL is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "URL is required",
+        },
       });
       return;
     }
 
     try {
       logger.info(`Testing scrape for URL: ${url}`);
-      
+
       const results = await this.webScrapingService.scrapeUrls([url]);
       const result = results[0];
 
@@ -436,9 +438,9 @@ export class LinkContentController {
         res.status(400).json({
           success: false,
           error: {
-            code: 'SCRAPING_FAILED',
-            message: 'Failed to scrape URL'
-          }
+            code: "SCRAPING_FAILED",
+            message: "Failed to scrape URL",
+          },
         });
         return;
       }
@@ -449,22 +451,22 @@ export class LinkContentController {
           url: result.url,
           title: result.title,
           content: result.content,
-          wordCount: result.metadata?.wordCount || result.content.split(' ').length,
+          wordCount: result.metadata?.wordCount || result.content.split(" ").length,
           qualityScore: result.qualityScore,
           metadata: result.metadata,
-          scrapedAt: result.scrapedAt
+          scrapedAt: result.scrapedAt,
         },
-        message: 'URL scraped successfully'
+        message: "URL scraped successfully",
       });
 
     } catch (error) {
-      logger.error('Error testing scrape:', error);
+      logger.error("Error testing scrape:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'SCRAPING_ERROR',
-          message: error instanceof Error ? error.message : 'Scraping failed'
-        }
+          code: "SCRAPING_ERROR",
+          message: error instanceof Error ? error.message : "Scraping failed",
+        },
       });
     }
   });
@@ -476,25 +478,25 @@ export class LinkContentController {
   healthCheck = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
       const isHealthy = await this.linkContentService.healthCheck();
-      
+
       res.json({
         success: true,
         data: {
-          status: isHealthy ? 'healthy' : 'unhealthy',
-          service: 'LinkBasedContentService',
-          timestamp: new Date().toISOString()
+          status: isHealthy ? "healthy" : "unhealthy",
+          service: "LinkBasedContentService",
+          timestamp: new Date().toISOString(),
         },
-        message: 'Health check completed'
+        message: "Health check completed",
       });
 
     } catch (error) {
-      logger.error('Health check failed:', error);
+      logger.error("Health check failed:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'HEALTH_CHECK_FAILED',
-          message: 'Service health check failed'
-        }
+          code: "HEALTH_CHECK_FAILED",
+          message: "Service health check failed",
+        },
       });
     }
   });
@@ -510,24 +512,24 @@ export class LinkContentController {
         id: c.id || c.category_slug || c.slug || c.key || c.id,
         category_name: c.category_name || c.name,
         category_slug: c.category_slug || c.id || c.slug,
-        description: c.description || '',
-        color_code: c.color_code || '#6B7280',
-        folder_count: c.folder_count || 0
+        description: c.description || "",
+        color_code: c.color_code || "#6B7280",
+        folder_count: c.folder_count || 0,
       }));
-      
+
       res.json({
         success: true,
         data: { categories },
-        message: 'Image categories retrieved successfully'
+        message: "Image categories retrieved successfully",
       });
     } catch (error) {
-      logger.error('Failed to get image categories:', error);
+      logger.error("Failed to get image categories:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'GALLERY_ERROR',
-          message: 'Failed to retrieve image categories'
-        }
+          code: "GALLERY_ERROR",
+          message: "Failed to retrieve image categories",
+        },
       });
     }
   });
@@ -538,34 +540,34 @@ export class LinkContentController {
    */
   getImageFolders = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { categorySlug } = req.params;
-    
+
     if (!categorySlug) {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Category slug is required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Category slug is required",
+        },
       });
       return;
     }
 
     try {
       const folders = await this.photoGalleryService.getFoldersByCategory(categorySlug);
-      
+
       res.json({
         success: true,
         data: { folders },
-        message: 'Image folders retrieved successfully'
+        message: "Image folders retrieved successfully",
       });
     } catch (error) {
-      logger.error('Failed to get image folders:', error);
+      logger.error("Failed to get image folders:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'GALLERY_ERROR',
-          message: 'Failed to retrieve image folders'
-        }
+          code: "GALLERY_ERROR",
+          message: "Failed to retrieve image folders",
+        },
       });
     }
   });
@@ -575,16 +577,16 @@ export class LinkContentController {
    * GET /api/v1/link-content/preview-images
    */
   previewImages = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const { categorySlug, folderName, limit = '5' } = req.query as { [key: string]: string };
-    
+    const { categorySlug, folderName, limit = "5" } = req.query as { [key: string]: string };
+
     try {
       // Fetch images by category (if provided) - use retry with mock fallback
       const result = await this.photoGalleryService.getFeaturedImagesWithRetry({
         category: categorySlug || undefined,
         limit: parseInt(limit, 10),
         metadata: true,
-        priority: 'desc',
-        maxRetries: 1
+        priority: "desc",
+        maxRetries: 1,
       });
 
       let images = result.images;
@@ -593,22 +595,22 @@ export class LinkContentController {
       if (folderName) {
         images = images.filter(img => img.folder_path?.toLowerCase().includes(folderName.toLowerCase()));
       }
-      
+
       logger.info(`📸 Preview images: ${images.length} images returned for category="${categorySlug}"`);
-      
+
       res.json({
         success: true,
         data: { images },
-        message: 'Preview images retrieved successfully'
+        message: "Preview images retrieved successfully",
       });
     } catch (error) {
-      logger.error('Failed to preview images:', error);
+      logger.error("Failed to preview images:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'GALLERY_ERROR',
-          message: 'Failed to retrieve preview images'
-        }
+          code: "GALLERY_ERROR",
+          message: "Failed to retrieve preview images",
+        },
       });
     }
   });
@@ -619,77 +621,78 @@ export class LinkContentController {
    */
   generateEnhancedContent = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { sourceContent, settings } = req.body;
-    
+
     if (!sourceContent || !settings) {
       res.status(400).json({
         success: false,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Source content and settings are required'
-        }
+          code: "VALIDATION_ERROR",
+          message: "Source content and settings are required",
+        },
       });
       return;
     }
 
     try {
       // Convert frontend format to EnhancedContentRequest format
-      const request = {
-        type: (settings.contentType === 'wordpress_blog' ? 'blog_post' : 'social_media') as 'blog_post' | 'social_media',
-        topic: sourceContent.title || 'Content Topic',
+      const request: ContentGenerationRequest = {
+        type: settings.contentType === "wordpress_blog" ? ContentType.BLOG_POST : ContentType.SOCIAL_MEDIA,
+        topic: sourceContent.title || "Content Topic",
         context: sourceContent.content,
-        targetAudience: settings.targetAudience || 'General audience',
-        keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],
+        targetAudience: settings.targetAudience || "General audience",
+        keywords: settings.keywords ? settings.keywords.split(",").map((k: string) => k.trim()) : [],
         brandVoice: {
-          tone: (settings.tone || 'professional') as 'professional' | 'casual' | 'friendly' | 'authoritative',
-          style: 'conversational',
-          vocabulary: 'advanced',
-          length: 'comprehensive',
-          brandName: settings.brandName || 'Your Brand'
+          tone: settings.tone || "professional",
+          style: "conversational",
+          vocabulary: "advanced",
+          length: "comprehensive",
+          brandName: settings.brandName || "Your Brand",
         },
-        preferredProvider: settings.preferredProvider || 'auto',
+        preferredProvider: settings.preferredProvider || "auto",
+        wordCount: settings.wordCount,
         imageSettings: settings.includeImages ? {
           includeImages: true,
           imageSelection: settings.imageSelection,
           imageCategory: settings.imageCategory,
           specificFolder: settings.specificFolder,
           maxImages: settings.maxImages || 3,
-          ensureConsistency: settings.ensureConsistency || false
+          ensureConsistency: settings.ensureConsistency || false,
         } : { includeImages: false },
-        language: settings.language || 'vietnamese',
-        specialInstructions: settings.specialRequest || ''
+        language: settings.language || "vietnamese",
+        specialInstructions: settings.specialRequest || "",
       };
 
-      logger.info('🎨 Starting enhanced content generation with images', {
+      logger.info("🎨 Starting enhanced content generation with images", {
         topic: request.topic,
         includeImages: request.imageSettings?.includeImages,
         imageSelection: request.imageSettings?.imageSelection,
-        imageCategory: request.imageSettings?.imageCategory
+        imageCategory: request.imageSettings?.imageCategory,
       });
-      
+
       const enhancedContent = await this.enhancedContentService.generateContentWithImages(request);
-      
+
       // Log the result to check if images were added
-      logger.info('✅ Enhanced content generated', {
+      logger.info("✅ Enhanced content generated", {
         hasMetadata: !!enhancedContent.metadata,
         hasFeaturedImage: !!enhancedContent.metadata?.featuredImage,
-        galleryImagesCount: enhancedContent.metadata?.galleryImages?.length || 0
+        galleryImagesCount: enhancedContent.metadata?.galleryImages?.length || 0,
       });
-      
+
       res.json({
         success: true,
         data: enhancedContent,
         enhanced: true,
         withImages: !!enhancedContent.metadata?.featuredImage,
-        message: 'Enhanced content generated successfully'
+        message: "Enhanced content generated successfully",
       });
     } catch (error) {
-      logger.error('Failed to generate enhanced content:', error);
+      logger.error("Failed to generate enhanced content:", error);
       res.status(500).json({
         success: false,
         error: {
-          code: 'GENERATION_ERROR',
-          message: 'Failed to generate enhanced content'
-        }
+          code: "GENERATION_ERROR",
+          message: "Failed to generate enhanced content",
+        },
       });
     }
   });
@@ -701,4 +704,4 @@ export class LinkContentController {
     await this.linkContentService.cleanup();
     await this.webScrapingService.close();
   }
-} 
+}

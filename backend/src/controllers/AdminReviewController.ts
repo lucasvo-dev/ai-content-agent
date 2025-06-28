@@ -358,39 +358,4 @@ export class AdminReviewController {
       message: 'Review templates retrieved successfully'
     });
   });
-
-  // Temporarily comment out problematic methods for deployment
-  /*
-  getReviewQueue = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  reviewContent = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  bulkReview = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  bulkApprove = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  editContent = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  getReviewQueue = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  getReviewStatistics = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-
-  getReviewStatistics = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    // Implementation will be added later
-  });
-  */
 } 

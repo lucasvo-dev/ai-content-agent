@@ -24,14 +24,14 @@ export interface ContentGenerationRequest {
   brandVoice: BrandVoice;
   targetAudience: string;
   keywords: string[];
+  wordCount?: number;
   requirements?: {
-    wordCount?: string;
     includeHeadings?: boolean;
     includeCTA?: boolean;
     seoOptimized?: boolean;
   };
   context?: string;
-  preferredProvider?: 'openai' | 'gemini' | 'auto';
+  preferredProvider?: 'openai' | 'gemini' | 'claude' | 'auto';
 }
 
 export interface GeneratedContent {

@@ -1,14 +1,15 @@
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { 
-  ContentGenerationRequest, 
-  GeneratedContent, 
-  BrandVoice,
-  ContentAnalysisResult,
-  ImprovementSuggestion 
-} from '../types/content.js';
+import Anthropic from '@anthropic-ai/sdk';
+import {
+  ContentGenerationRequest,
+  GeneratedContent,
+  ContentMetadata,
+  BrandVoiceConfig,
+  ContentStatus,
+} from '../types/index.js';
 
-export type AIProvider = 'openai' | 'gemini' | 'hybrid';
+export type AIProvider = 'openai' | 'gemini' | 'claude' | 'hybrid';
 
 interface ProviderStats {
   totalRequests: number;
@@ -19,9 +20,31 @@ interface ProviderStats {
   lastUsed: Date | null;
 }
 
+interface ContentAnalysisResult {
+  contentId: string;
+  qualityScore: number;
+  seoScore: number;
+  readabilityScore: number;
+  engagementScore: number;
+  keywordDensity: Record<string, number>;
+  suggestions: string[];
+  metadata: {
+    analyzedAt: string;
+    provider: string;
+  };
+}
+
+interface ImprovementSuggestion {
+  type: 'seo' | 'readability' | 'engagement' | 'content';
+  priority: 'high' | 'medium' | 'low';
+  suggestion: string;
+  impact: string;
+}
+
 export class HybridAIService {
   private openai: OpenAI | null = null;
   private gemini: any = null;
+  private claude: any = null;
   private provider: AIProvider;
   private stats: Map<string, ProviderStats> = new Map();
 
@@ -71,6 +94,20 @@ export class HybridAIService {
       }
     } else {
       console.log('⚠️ Gemini not available - missing or invalid API key');
+    }
+
+    // Initialize Claude
+    if (process.env.CLAUDE_API_KEY && process.env.CLAUDE_API_KEY !== 'placeholder-claude-key') {
+      try {
+        this.claude = new Anthropic({
+          apiKey: process.env.CLAUDE_API_KEY,
+        });
+        console.log('✅ Claude initialized successfully');
+      } catch (error) {
+        console.error('❌ Claude initialization failed:', error);
+      }
+    } else {
+      console.log('⚠️ Claude not available - missing or invalid API key');
     }
   }
 
@@ -130,6 +167,8 @@ export class HybridAIService {
           result = await this.generateWithOpenAI(request);
         } else if (selectedProvider === 'gemini') {
           result = await this.generateWithGemini(request);
+        } else if (selectedProvider === 'claude') {
+          result = await this.generateWithClaude(request);
         } else {
           throw new Error(`Unknown provider: ${selectedProvider}`);
         }
@@ -157,7 +196,7 @@ export class HybridAIService {
         // Try alternative provider for retryable errors
         const isRetryable = this.isRetryableError(originalError);
         if (isRetryable) {
-          const alternativeProvider = selectedProvider === 'openai' ? 'gemini' : 'openai';
+          const alternativeProvider = selectedProvider === 'openai' ? 'gemini' : selectedProvider === 'gemini' ? 'claude' : 'openai';
           
           if (this.isProviderAvailable(alternativeProvider)) {
             console.log(`🔄 Retrying with alternative provider: ${alternativeProvider}`);
@@ -166,8 +205,10 @@ export class HybridAIService {
             try {
               if (alternativeProvider === 'openai') {
                 result = await this.generateWithOpenAI(request);
-              } else {
+              } else if (alternativeProvider === 'gemini') {
                 result = await this.generateWithGemini(request);
+              } else {
+                result = await this.generateWithClaude(request);
               }
 
               // Success with alternative provider
@@ -226,28 +267,21 @@ export class HybridAIService {
       console.warn(`⚠️ Preferred provider ${request.preferredProvider} not available, falling back to auto`);
     }
     
-    // Auto selection: Prefer Gemini for reliability and speed
-    // Only use OpenAI for very complex content requiring premium quality
-    const complexity = this.assessComplexity(request);
-    const urgency = this.assessUrgency(request);
-    
-    // Prefer Gemini for most cases (fast, reliable, free)
-    if (this.isProviderAvailable('gemini')) {
-      // Only use OpenAI for very high complexity content
-      if (complexity > 0.8 && urgency < 0.5 && this.isProviderAvailable('openai')) {
-        console.log('🔵 Auto-selected OpenAI for high complexity content');
-        return 'openai';
-      }
-      console.log('🟢 Auto-selected Gemini for fast, reliable generation');
-      return 'gemini';
+    // Fallback priority: Claude -> OpenAI -> Gemini
+    if (this.isProviderAvailable('claude')) {
+      console.log(`🤖 Auto-selecting Claude (Default priority)`);
+      return 'claude';
     }
-    
-    // Fallback to OpenAI if Gemini unavailable
     if (this.isProviderAvailable('openai')) {
-      console.log('🔵 Auto-selected OpenAI (Gemini unavailable)');
+        console.log(`🤖 Auto-selecting OpenAI (Default priority)`);
       return 'openai';
     }
-    
+    if (this.isProviderAvailable('gemini')) {
+        console.log(`🤖 Auto-selecting Gemini (Default priority)`);
+      return 'gemini';
+    }
+
+    console.log('⚠️ No providers available for auto-selection.');
     throw new Error('No AI providers available');
   }
 
@@ -290,9 +324,9 @@ export class HybridAIService {
     if (request.brandVoice.length === 'comprehensive') score += 0.2;
     if (request.brandVoice.style === 'technical') score += 0.2;
 
-    // Requirements complexity
-    if (request.requirements?.seoOptimized) score += 0.1;
-    if (request.requirements?.includeHeadings) score += 0.1;
+    // Requirements complexity - commented out as property doesn't exist
+    // if (request.requirements?.seoOptimized) score += 0.1;
+    // if (request.requirements?.includeHeadings) score += 0.1;
     if (request.context && request.context.length > 100) score += 0.1;
 
     return Math.min(score, 1.0);
@@ -318,7 +352,7 @@ export class HybridAIService {
     const prompt = this.buildPrompt(request);
     
     const response = await this.openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview', // Or a model of your choice
+      model: 'gpt-4o', // Updated to GPT-4o for better performance and cost
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
       max_tokens: 4096,
@@ -337,6 +371,7 @@ export class HybridAIService {
       body: textContent,
       excerpt: this.generateExcerpt(textContent),
       type: request.type,
+      status: 'draft' as ContentStatus,
       metadata: {
         provider: 'openai',
         aiModel: response.model,
@@ -371,6 +406,7 @@ export class HybridAIService {
       body: textContent,
       excerpt: this.generateExcerpt(textContent),
       type: request.type,
+      status: 'draft' as ContentStatus,
       metadata: {
         provider: 'gemini',
         aiModel: 'gemini-1.5-flash',
@@ -383,6 +419,46 @@ export class HybridAIService {
         promptVersion: '2.0',
         tokensUsed: 0, // Placeholder
         safetyRatings: response.candidates?.[0]?.safetyRatings || [],
+      },
+    };
+  }
+
+  private async generateWithClaude(request: ContentGenerationRequest): Promise<GeneratedContent> {
+    if (!this.claude) {
+      throw new Error('Claude client not initialized');
+    }
+
+    const prompt = this.buildPrompt(request);
+
+    const response = await this.claude.messages.create({
+      model: 'claude-3-haiku-20240307', // Cheapest and fastest Claude model for content writing
+      max_tokens: 4096,
+      temperature: 0.7,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const textContent = response.content[0].text || '';
+    const wordCount = this.countWords(textContent);
+
+    return {
+      id: `claude-${Date.now()}`,
+      title: request.topic, // We can improve title generation later
+      body: textContent,
+      excerpt: this.generateExcerpt(textContent),
+      type: request.type,
+      status: 'draft' as ContentStatus,
+      metadata: {
+        provider: 'claude',
+        aiModel: 'claude-3-haiku-20240307',
+        cost: this.calculateClaudeCost(response.usage?.input_tokens || 0, response.usage?.output_tokens || 0),
+        generatedAt: new Date().toISOString(),
+        wordCount: wordCount,
+        seoScore: this.calculateSEOScore(textContent, request.keywords),
+        readabilityScore: this.calculateReadabilityScore(textContent),
+        engagementScore: this.calculateEngagementScore(textContent),
+        promptVersion: '2.0',
+        tokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
+        safetyRatings: [],
       },
     };
   }
@@ -403,30 +479,29 @@ export class HybridAIService {
     const tone = brandVoice?.tone || 'professional';
 
     if (type === 'blog_post') {
-      return `You are an expert content writer specializing in WordPress blog content. Your task is to transform the 'SOURCE ARTICLE' into high-quality WordPress-ready content.
+      return `You are an expert content writer and SEO specialist. Your task is to write a new, unique, and high-quality article based on the provided source material.
 
 ### CRITICAL RULES (Follow Strictly):
-1.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for WordPress editor. Use proper HTML tags. DO NOT include <html>, <head>, <body> tags.
-2.  **HTML STRUCTURE**: Use <h2> for main titles, <h3> for subsections, <p> for paragraphs, <strong> for bolding, and <ul>/<li> for lists.
-3.  **STRUCTURAL MIRRORING**: You MUST mirror the structure of the source article.
-4.  **LENGTH REQUIREMENT**: The final article MUST contain at least 1000 words. Expand on the source material with valuable insights, examples, and details.
-5.  **IMAGE PLACEMENT (CRITICAL)**: Strategically place the placeholder \`[INSERT_IMAGE]\` 3 to 5 times where an image would be most effective. Place it AFTER a paragraph.
+1.  **ORIGINAL CONTENT**: Do NOT copy the source article. Use it only as a reference for key information, facts, and ideas. You must write a completely new and original piece of content.
+2.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for a WordPress editor. Use <h2> for the main title, <h3> for subheadings, <p> for paragraphs, <strong> for bolding key phrases, and <ul>/<li> for lists. Do NOT include <html>, <head>, or <body> tags.
+3.  **LOGICAL STRUCTURE**: Create a new, logical, and engaging structure for the article. Do not mirror the structure of the source article.
+4.  **STRICT WORD COUNT**: The final article's total word count MUST be **exactly ${request.wordCount || 1000} words**. It is critical that you adhere to this word count. Do not write significantly more or less.
+5.  **IMAGE PLACEMENT (CRITICAL)**: Strategically place the placeholder \`[INSERT_IMAGE]\` 3 to 5 times where an image would be most effective. Place it on a new line AFTER a paragraph.
 6.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
-7.  **CONTENT FIDELITY & REWRITING**: Base the content EXCLUSIVELY on the 'SOURCE ARTICLE' but rewrite every sentence.
-8.  **BRAND INTEGRATION**: If you find competitor brands, replace them with "${brandName}".
-9.  **AUDIENCE/TONE**: Write for "${targetAudience}" with a ${tone} tone.
-10. **KEYWORD INTEGRATION**: Weave these keywords naturally into the article: "${keywords?.join(', ')}".
-11. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
+7.  **BRAND INTEGRATION**: If you find competitor brands mentioned, replace them with "${brandName}". Mention "${brandName}" naturally 1-2 times if relevant.
+8.  **AUDIENCE & TONE**: Write for a "${targetAudience}" audience using a ${tone} tone.
+9.  **KEYWORD INTEGRATION**: Weave these keywords naturally into the article: "${keywords?.join(', ')}".
+10. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
 
-### SOURCE ARTICLE TO TRANSFORM:
+### SOURCE MATERIAL FOR REFERENCE:
 ---
-**Original Title:** ${topic}
-**Complete Source Content:**
+**Original Topic:** ${topic}
+**Source Content Snippet:**
 ${context}
 ---
 
 ### OUTPUT REQUIREMENTS:
-Provide ONLY the final HTML content. Do not add any meta-commentary.`;
+Provide ONLY the final HTML content. Do not add any meta-commentary or explanations. Your output should begin directly with the <h2> title tag.`;
     }
 
     if (type === 'social_media') {
@@ -558,10 +633,15 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
   }
 
   private calculateOpenAICost(tokens: number): number {
-    // GPT-4 Turbo pricing: $0.01 per 1K tokens (input) + $0.03 per 1K tokens (output)
-    const inputTokens = tokens * 0.7;
-    const outputTokens = tokens * 0.3;
-    return (inputTokens / 1000 * 0.01) + (outputTokens / 1000 * 0.03);
+    // GPT-4o pricing: $5/1M input tokens, $15/1M output tokens (average ~$10/1M)
+    return (tokens / 1000000) * 10;
+  }
+
+  private calculateClaudeCost(inputTokens: number, outputTokens: number): number {
+    // Claude 3 Haiku pricing: $0.25/1M input tokens, $1.25/1M output tokens
+    const inputCost = (inputTokens / 1000000) * 0.25;
+    const outputCost = (outputTokens / 1000000) * 1.25;
+    return inputCost + outputCost;
   }
 
   private countWords(text: string): number {
@@ -681,6 +761,11 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
         provider: 'gemini',
         available: !!this.gemini,
         cost: 'Free (1,500 requests/day)'
+      },
+      {
+        provider: 'claude',
+        available: !!this.claude,
+        cost: 'Low cost ($0.25-1.25/1M tokens)'
       }
     ];
   }
@@ -695,11 +780,11 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
     // Add OpenAI models if available
     if (this.openai) {
       models.push({
-        id: 'gpt-4-turbo-preview',
-        name: 'GPT-4 Turbo',
+        id: 'gpt-4o',
+        name: 'GPT-4o',
         provider: 'openai',
-        capabilities: ['text-generation', 'content-optimization', 'advanced-reasoning'],
-        costPerToken: 0.02, // Average cost
+        capabilities: ['text-generation', 'content-optimization', 'advanced-reasoning', 'multimodal'],
+        costPerToken: 0.01, // GPT-4o is more cost-effective
         maxTokens: 4096,
         recommended: this.provider === 'openai',
         status: 'available'
@@ -720,6 +805,20 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
       });
     }
     
+         // Add Claude models if available
+     if (this.claude) {
+       models.push({
+         id: 'claude-3-haiku-20240307',
+         name: 'Claude 3 Haiku',
+         provider: 'claude',
+         capabilities: ['text-generation', 'content-optimization', 'advanced-reasoning', 'fast-generation'],
+         costPerToken: 0.0015, // Average cost per 1K tokens
+         maxTokens: 200000,
+         recommended: this.provider === 'claude',
+         status: 'available'
+       });
+     }
+    
     return models;
   }
 
@@ -730,24 +829,25 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
       seoScore: 78,
       readabilityScore: 82,
       engagementScore: 76,
+      keywordDensity: {},
       suggestions: [
-        {
-          type: 'seo',
-          priority: 'medium',
-          description: 'Consider adding more relevant keywords',
-          impact: 'Could improve search ranking'
-        }
+        'Consider adding more relevant keywords for better SEO',
+        'Break up long paragraphs for better readability',
+        'Add a stronger call-to-action at the end'
       ],
-      analyzedAt: new Date().toISOString()
+      metadata: {
+        analyzedAt: new Date().toISOString(),
+        provider: 'openai'
+      }
     };
   }
 
   async generateImprovements(contentId: string, feedback: string): Promise<ImprovementSuggestion[]> {
     return [
       {
-        type: 'structure',
+        type: 'content',
         priority: 'high',
-        description: 'Add more specific examples',
+        suggestion: 'Add more specific examples',
         impact: 'Increase reader engagement'
       }
     ];
@@ -756,21 +856,24 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
   async getUsageStats(): Promise<any> {
     const openaiStats = this.stats.get('openai');
     const geminiStats = this.stats.get('gemini');
+    const claudeStats = this.stats.get('claude');
     
-    const totalRequests = (openaiStats?.totalRequests || 0) + (geminiStats?.totalRequests || 0);
-    const totalSuccessful = (openaiStats?.successfulRequests || 0) + (geminiStats?.successfulRequests || 0);
-    const totalCost = (openaiStats?.totalCost || 0) + (geminiStats?.totalCost || 0);
+    const totalRequests = (openaiStats?.totalRequests || 0) + (geminiStats?.totalRequests || 0) + (claudeStats?.totalRequests || 0);
+    const totalSuccessful = (openaiStats?.successfulRequests || 0) + (geminiStats?.successfulRequests || 0) + (claudeStats?.successfulRequests || 0);
+    const totalCost = (openaiStats?.totalCost || 0) + (geminiStats?.totalCost || 0) + (claudeStats?.totalCost || 0);
     
     const openaiResponseTime = openaiStats?.averageResponseTime || 0;
     const geminiResponseTime = geminiStats?.averageResponseTime || 0;
+    const claudeResponseTime = claudeStats?.averageResponseTime || 0;
     const weightedAvgResponseTime = totalRequests > 0 
-      ? ((openaiStats?.totalRequests || 0) * openaiResponseTime + (geminiStats?.totalRequests || 0) * geminiResponseTime) / totalRequests
+      ? ((openaiStats?.totalRequests || 0) * openaiResponseTime + (geminiStats?.totalRequests || 0) * geminiResponseTime + (claudeStats?.totalRequests || 0) * claudeResponseTime) / totalRequests
       : 0;
 
     return {
       totalRequests,
       openaiRequests: openaiStats?.totalRequests || 0,
       geminiRequests: geminiStats?.totalRequests || 0,
+      claudeRequests: claudeStats?.totalRequests || 0,
       totalCost: Math.round(totalCost * 10000) / 10000, // Round to 4 decimal places
       averageResponseTime: Math.round(weightedAvgResponseTime),
       successRate: totalRequests > 0 ? Math.round((totalSuccessful / totalRequests) * 100) : 100,
@@ -794,24 +897,34 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
           avgResponseTime: Math.round(geminiStats?.averageResponseTime || 0),
           totalCost: 0, // Always free
           lastUsed: geminiStats?.lastUsed?.toISOString() || null
+        },
+        claude: {
+          requests: claudeStats?.totalRequests || 0,
+          successRate: claudeStats && claudeStats.totalRequests > 0 
+            ? Math.round((claudeStats.successfulRequests / claudeStats.totalRequests) * 100) 
+            : 100,
+          avgResponseTime: Math.round(claudeStats?.averageResponseTime || 0),
+          totalCost: 0, // Always free
+          lastUsed: claudeStats?.lastUsed?.toISOString() || null
         }
       },
       period: 'session-based',
-      recommendations: this.generateUsageRecommendations(openaiStats, geminiStats)
+      recommendations: this.generateUsageRecommendations(openaiStats, geminiStats, claudeStats)
     };
   }
 
-  private generateUsageRecommendations(openaiStats?: ProviderStats, geminiStats?: ProviderStats): string[] {
+  private generateUsageRecommendations(openaiStats?: ProviderStats, geminiStats?: ProviderStats, claudeStats?: ProviderStats): string[] {
     const recommendations: string[] = [];
     
-    if (!openaiStats && !geminiStats) {
+    if (!openaiStats && !geminiStats && !claudeStats) {
       recommendations.push("No usage data available yet. Start generating content to see recommendations.");
       return recommendations;
     }
     
-    const totalCost = (openaiStats?.totalCost || 0) + (geminiStats?.totalCost || 0);
+    const totalCost = (openaiStats?.totalCost || 0) + (geminiStats?.totalCost || 0) + (claudeStats?.totalCost || 0);
     const openaiRequests = openaiStats?.totalRequests || 0;
     const geminiRequests = geminiStats?.totalRequests || 0;
+    const claudeRequests = claudeStats?.totalRequests || 0;
     
     // Cost optimization recommendations
     if (totalCost > 5) {
@@ -820,6 +933,10 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
     
     if (openaiRequests > geminiRequests * 3) {
       recommendations.push("You're using OpenAI frequently. Try Gemini for social media and simple content.");
+    }
+    
+    if (openaiRequests > claudeRequests * 3) {
+      recommendations.push("You're using Claude frequently. Try OpenAI for more complex content.");
     }
     
     // Performance recommendations
@@ -831,8 +948,12 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
       recommendations.push("Gemini success rate is low. Consider using OpenAI for better reliability.");
     }
     
+    if (claudeStats && claudeStats.successfulRequests / claudeStats.totalRequests < 0.8) {
+      recommendations.push("Claude success rate is low. Consider using OpenAI for better reliability.");
+    }
+    
     // Usage pattern recommendations
-    if (openaiRequests + geminiRequests > 50) {
+    if (openaiRequests + geminiRequests + claudeRequests > 50) {
       recommendations.push("High usage detected. Consider implementing content caching to reduce API calls.");
     }
     
@@ -846,6 +967,7 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
   private isProviderAvailable(provider: string): boolean {
     if (provider === 'openai' && this.openai) return true;
     if (provider === 'gemini' && this.gemini) return true;
+    if (provider === 'claude' && this.claude) return true;
     return false;
   }
 

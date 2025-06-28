@@ -80,69 +80,78 @@ export enum ContentType {
   BLOG_POST = "blog_post",
   SOCIAL_MEDIA = "social_media",
   EMAIL = "email",
-  LANDING_PAGE = "landing_page",
+  LANDING_PAGE = "ad_copy",
 }
 
 export enum ContentStatus {
   DRAFT = "draft",
-  UNDER_REVIEW = "under_review",
+  PENDING_REVIEW = "pending_review",
   APPROVED = "approved",
   PUBLISHED = "published",
   ARCHIVED = "archived",
+  ERROR = "error",
 }
 
 export interface ContentMetadata {
-  keywords?: string[];
-  seoTitle?: string;
-  seoDescription?: string;
-  featuredImage?: string;
+  sourceUrl?: string;
   wordCount?: number;
-  readingTime?: number;
-  targetAudience?: string;
-  brandVoice?: BrandVoiceConfig;
-  // Additional properties for services
+  readabilityScore?: any;
   seoScore?: number;
-  uniquenessScore?: number;
-  qualityScore?: number;
-  aiProvider?: string;
-  batchJobId?: string;
-  featuredImageSuggestion?: string;
-  finishReason?: string;
-  safetyRatings?: any;
-  selectedProvider?: string;
-  requestedProvider?: string;
-  selectionReason?: 'manual_selection' | 'intelligent_selection' | 'error_fallback' | 'primary_choice' | 'fallback_after_error';
-  originalError?: string;
-  responseTime?: number;
-  generatedAt?: string;
-  sourceUrls?: string[];
-  promptType?: string;
+  engagementScore?: any;
+  aiModel?: string;
+  promptVersion?: string;
+  processingTime?: number;
+  warnings?: string[];
+  featuredImage?: string;
+  featuredImageAlt?: string;
+  featuredImageCaption?: string;
+  galleryImages?: Array<{
+    url: string;
+    alt_text: string;
+    caption?: string;
+    wp_media_id?: number;
+  }>;
+  [key: string]: any;
 }
 
 export interface BrandVoiceConfig {
-  tone: "professional" | "casual" | "friendly" | "authoritative";
-  style: "formal" | "conversational" | "technical" | "creative";
-  vocabulary: "simple" | "advanced" | "industry-specific";
-  length: "concise" | "detailed" | "comprehensive";
+  /** Tone of the content, e.g. "professional", "casual" */
+  tone: string;
+
+  /** Writing style, e.g. "formal", "conversational" */
+  style: string;
+
+  /** Vocabulary complexity, e.g. "simple", "advanced" */
+  vocabulary: string;
+
+  /** Desired length description, e.g. "concise", "detailed" */
+  length: string;
+
+  /** Optional brand name to inject into content */
+  brandName?: string;
 }
 
 // Content generation types
 export interface ContentGenerationRequest {
-  topic: string;
   type: ContentType;
-  brandVoice: BrandVoiceConfig;
+  topic: string;
+  context?: string;
   targetAudience: string;
   keywords: string[];
-  requirements: {
-    wordCount?: string;
-    includeImages?: boolean;
-    includeHeadings?: boolean;
-    includeCTA?: boolean;
-    seoOptimized?: boolean;
-    tone?: string;
+  brandVoice: BrandVoiceConfig;
+  preferredProvider?: "auto" | "openai" | "gemini" | "claude";
+  language?: "vietnamese" | "english";
+  specialInstructions?: string;
+  wordCount?: number;
+  imageSettings?: {
+    includeImages: boolean;
+    imageSelection?: "category" | "folder" | "manual";
+    imageCategory?: string;
+    specificFolder?: string;
+    maxImages?: number | "auto";
+    ensureConsistency?: boolean;
+    selectedImages?: string[];
   };
-  context?: string;
-  preferredProvider?: 'openai' | 'gemini' | 'auto';
 }
 
 export interface ContentGenerationResponse {
@@ -330,6 +339,8 @@ export interface EnvConfig {
   JWT_EXPIRES_IN: string;
   OPENAI_API_KEY: string;
   OPENAI_MODEL: string;
+  GEMINI_API_KEY: string;
+  CLAUDE_API_KEY: string;
   REDIS_URL: string;
   // SSO Configuration
   GOOGLE_CLIENT_ID?: string;
@@ -378,8 +389,8 @@ export interface GeneratedContent {
   title: string;
   body: string;
   excerpt?: string;
-  type?: ContentType | 'blog_post' | 'social_media' | 'email' | 'ad_copy';
-  status?: ContentStatus;
+  type: ContentType;
+  status: ContentStatus;
   metadata: ContentMetadata;
   qualityScore?: number;
   seoTitle?: string;
@@ -757,4 +768,20 @@ export interface ScrapedContent {
   // Additional properties
   sourceUrl?: string;
   crawledContent?: any;
+}
+
+export interface GalleryImage {
+  id: string | number;
+  source_key: string;
+  relative_path: string;
+  folder_name: string;
+  category: string;
+  alt_text: string;
+  description?: string;
+  thumbnail_url: string;
+  full_url: string;
+  download_url: string;
+  priority: number;
+  tags?: string[];
+  wordpress_ready?: boolean;
 } 

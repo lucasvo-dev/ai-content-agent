@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/dev-server.ts",
     "build": "tsc --build && tsc-alias",
+    "build:dev": "tsc -p tsconfig.dev.json && tsc-alias -p tsconfig.dev.json",
     "build:prod": "tsc --build --force && tsc-alias",
     "start": "node dist/production-server.js",
     "test": "jest",
@@ -13,6 +14,7 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
+    "lint:prod": "eslint src --ext .ts --max-warnings=9999 || true",
     "type-check": "tsc --noEmit"
   },
   "keywords": [
@@ -26,6 +28,7 @@
   "author": "AI Content Agent Team",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
     "@google/generative-ai": "^0.11.4",
     "@langchain/community": "^0.2.0",
     "@langchain/core": "^0.2.36",

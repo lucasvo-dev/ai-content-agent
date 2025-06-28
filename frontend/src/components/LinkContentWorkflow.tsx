@@ -14,7 +14,8 @@ import {
   ClipboardDocumentIcon,
   CloudArrowUpIcon,
   ChartBarIcon,
-  DocumentDuplicateIcon
+  DocumentDuplicateIcon,
+  ArrowsRightLeftIcon
 } from '@heroicons/react/24/outline';
 
 import { Button } from './ui/Button';
@@ -27,7 +28,7 @@ import { linkContentApi, aiApi, wordpressMultiSiteApi } from '../services/api';
 import { photoGalleryApi, type PhotoGalleryCategory } from '../services/photoGalleryApi';
 
 // ENHANCED: 4-step workflow with management
-const WORKFLOW_STEPS = [
+const getWorkflowSteps = () => [
   { id: 'urls', title: 'URLs & Crawler', icon: GlobeAltIcon, description: 'Input URLs and crawl content' },
   { id: 'settings', title: 'Content Settings', icon: CogIcon, description: 'Configure AI generation settings' },
   { id: 'generation', title: 'Generate & Review', icon: SparklesIcon, description: 'Generate and review content' },
@@ -51,13 +52,14 @@ interface URLItem {
 // Simplified LLM Settings interface based on best practices
 interface LLMSettings {
   contentType: 'wordpress_blog' | 'facebook_post';
-  preferredProvider: 'auto' | 'openai' | 'gemini';
+  preferredProvider: 'auto' | 'openai' | 'gemini' | 'claude';
   tone: 'professional' | 'casual' | 'friendly' | 'authoritative';
   language: 'vietnamese' | 'english';
   targetAudience: string;
   brandName: string;
   keywords: string;
   specialRequest: string;
+  wordCount: number; // Add word count
   // Image settings
   includeImages: boolean;
   imageSelection: 'category' | 'folder';
@@ -66,8 +68,10 @@ interface LLMSettings {
   folderSuggestions?: string[];
   maxImages: number | 'auto';
   ensureConsistency: boolean;
-  // WordPress Multi-site settings
-  wordpressSiteTarget?: 'auto' | 'wedding' | 'yearbook' | 'general';
+  ensureAlbumConsistency: boolean; // NEW: Đảm bảo ảnh từ cùng 1 album
+  preferPortrait: boolean; // NEW: Ưu tiên ảnh chân dung
+  // WordPress Multi-site settings  
+  wordpressSiteTarget?: 'wedding' | 'yearbook' | 'general';
 }
 
 // Generated content interface
@@ -80,6 +84,7 @@ interface GeneratedContentItem {
   metadata?: {
     qualityScore: number;
     wordCount: number;
+    aiModel?: string;
   };
   publishedAt?: string;
   publishedUrl?: string;
@@ -105,6 +110,7 @@ export function LinkContentWorkflow() {
     brandName: '',
     keywords: '',
     specialRequest: '',
+    wordCount: 1200, // Default word count
     // Image settings
     includeImages: true,
     imageSelection: 'category',
@@ -113,12 +119,15 @@ export function LinkContentWorkflow() {
     folderSuggestions: [],
     maxImages: 'auto',
     ensureConsistency: true,
+    ensureAlbumConsistency: false, // NEW: Default false
+    preferPortrait: false, // NEW: Default false
     // WordPress Multi-site settings
-    wordpressSiteTarget: 'auto',
+    wordpressSiteTarget: 'wedding',
   });
 
   // Get crawled items
   const crawledItems = urlItems.filter(item => item.status === 'crawled');
+  const WORKFLOW_STEPS = getWorkflowSteps();
   const totalProgress = ((currentStep + 1) / WORKFLOW_STEPS.length) * 100;
 
   // Get approved content count for fine-tuning progress (riêng cho từng WordPress site)
@@ -241,6 +250,15 @@ export function LinkContentWorkflow() {
       retryCount?: number;
     };
   }> => {
+    console.log('📝 generateContentWithSettings called with:', {
+      sourceUrl: sourceItem.url,
+      settings: settings,
+      imageSettings: {
+        includeImages: settings.includeImages,
+        imageCategory: settings.imageCategory,
+        ensureAlbumConsistency: settings.ensureAlbumConsistency
+      }
+    });
     const maxRetries = 2; // Allow up to 2 retries
     const sourceContent = sourceItem.crawledContent?.content || '';
     const sourceTitle = sourceItem.crawledContent?.title || 'Untitled';
@@ -271,13 +289,16 @@ export function LinkContentWorkflow() {
           brandName: brandName,
         },
         preferredProvider: settings.preferredProvider,
+        wordCount: settings.wordCount, // Pass word count
         imageSettings: settings.includeImages ? {
           includeImages: settings.includeImages,
-          imageSelection: sourceItem.imageFolder ? 'specific-folder' : settings.imageSelection,
+          imageSelection: settings.imageSelection,
           imageCategory: settings.imageCategory,
-          specificFolder: sourceItem.imageFolder || settings.specificFolder,
+          specificFolder: settings.specificFolder,
           maxImages: settings.maxImages,
           ensureConsistency: settings.ensureConsistency,
+          ensureAlbumConsistency: settings.ensureAlbumConsistency,
+          preferPortrait: settings.preferPortrait,
         } : undefined,
         // Pass language and special request directly
         language: settings.language,
@@ -329,31 +350,59 @@ export function LinkContentWorkflow() {
         }
       };
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(`❌ AI API Error (attempt ${retryCount + 1}):`, error);
       
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const isRetryableError = 
-        errorMessage.includes('timeout') || 
-        errorMessage.includes('rate limit') ||
-        errorMessage.includes('network') ||
-        errorMessage.includes('503') ||
-        errorMessage.includes('502') ||
-        errorMessage.includes('500');
+      const errorData = error.response?.data?.error || {};
+      const errorMessage = errorData.details || errorData.message || error.message || 'Unknown error';
       
-      // Retry logic for retryable errors
-      if (isRetryableError && retryCount < maxRetries) {
-        console.log(`🔄 Retrying... (${retryCount + 1}/${maxRetries})`);
-        
-        // Exponential backoff: 2s, 4s, 8s
-        const delayMs = Math.pow(2, retryCount + 1) * 1000;
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        
-        return generateContentWithSettings(sourceItem, settings, retryCount + 1);
+      // Display detailed error info
+      if (errorData.providerErrors) {
+        console.error('Provider-specific errors:', errorData.providerErrors);
       }
       
-      // Final failure - no more retries
-      throw new Error(`AI content generation failed after ${retryCount + 1} attempts: ${errorMessage}. ${isRetryableError ? 'All retries exhausted.' : 'Not retryable.'}`);
+      if (errorData.suggestions && errorData.suggestions.length > 0) {
+        console.log('Suggestions:', errorData.suggestions);
+      }
+      
+      // Check if we can retry with different provider
+      if (errorData.code === 'QUOTA_EXCEEDED' && retryCount < 1) {
+        console.log('Quota exceeded, trying with different provider...');
+        
+        // Switch provider for retry
+        const alternativeProvider = settings.preferredProvider === 'openai' ? 'gemini' : 
+                                   settings.preferredProvider === 'gemini' ? 'claude' : 'openai';
+        const retrySettings = {
+          ...settings,
+          preferredProvider: alternativeProvider as 'auto' | 'openai' | 'gemini' | 'claude'
+        };
+        
+        // Retry with alternative provider
+        return generateContentWithSettings(sourceItem, retrySettings, retryCount + 1);
+      }
+      
+      // Build comprehensive error message
+      let detailedError = errorMessage;
+      
+      if (errorData.code === 'QUOTA_EXCEEDED') {
+        detailedError = `AI Quota Exceeded: ${errorMessage}`;
+        if (errorData.providerErrors) {
+          detailedError += '\n\nProvider Details:';
+          Object.entries(errorData.providerErrors).forEach(([provider, err]) => {
+            detailedError += `\n- ${provider}: ${err}`;
+          });
+        }
+        if (errorData.suggestions) {
+          detailedError += '\n\nSuggestions:';
+          errorData.suggestions.forEach((suggestion: string) => {
+            detailedError += `\n• ${suggestion}`;
+          });
+        }
+      } else if (errorData.code === 'RATE_LIMITED') {
+        detailedError = `Rate Limited: Please wait ${errorData.retryAfter || 60} seconds before trying again.`;
+      }
+      
+      throw new Error(detailedError);
     }
   };
 
@@ -509,6 +558,9 @@ export function LinkContentWorkflow() {
     ));
 
     try {
+      // IMPORTANT: Use the LATEST settings, not captured closure values
+      console.log('🔄 Regenerating with current settings:', llmSettings);
+      
       const newContent = await generateContentWithSettings(sourceItem, llmSettings);
 
       setGeneratedContent(prev => prev.map(item => 
@@ -559,7 +611,7 @@ export function LinkContentWorkflow() {
       const publishData = {
         title: content.title,
         content: content.body,
-        targetSiteId: llmSettings.wordpressSiteTarget === 'auto' ? undefined : llmSettings.wordpressSiteTarget,
+        targetSiteId: llmSettings.wordpressSiteTarget,
         status: 'publish' as const,
         contentType: llmSettings.contentType,
       };
@@ -575,17 +627,17 @@ export function LinkContentWorkflow() {
               ...item, 
                 status: 'published' as const,
                 publishedAt: new Date().toISOString(),
-                publishedUrl: result.url || '',
-                publishedSite: result.siteName || ''
+                publishedUrl: result.data?.url || '',
+                publishedSite: result.data?.siteName || ''
             }
           : item
       ));
       
-        toast.success(`Published successfully to ${result.siteName}!`, { id: 'publishing' });
+        toast.success(`Published successfully to ${result.data?.siteName || 'site'}!`, { id: 'publishing' });
         
         // Open the published URL in a new tab
-        if (result.url) {
-          window.open(result.url, '_blank');
+        if (result.data?.url) {
+          window.open(result.data.url, '_blank');
         }
       } else {
         throw new Error(result.message || 'Publishing failed');
@@ -666,11 +718,12 @@ export function LinkContentWorkflow() {
         );
       case 1:
         return (
-          <SettingsStep 
-            llmSettings={llmSettings}
-            onSettingsChange={setLlmSettings}
-            crawledItems={crawledItems}
-          />
+                      <SettingsStep 
+              llmSettings={llmSettings} 
+              onSettingsChange={setLlmSettings}
+              crawledItems={crawledItems}
+              currentLanguage="vietnamese"
+            />
         );
       case 2:
         return (
@@ -686,6 +739,7 @@ export function LinkContentWorkflow() {
             llmSettings={llmSettings}
             approvedStats={approvedStats}
             onClearApprovedContent={clearApprovedContent}
+            onSettingsChange={setLlmSettings}
           />
         );
       case 3:
@@ -707,7 +761,7 @@ export function LinkContentWorkflow() {
       {/* Header with improved progress indicator */}
       <div className="text-center space-y-4">
         <h1 className="text-3xl font-bold text-gray-900">Link-Based Content Generator</h1>
-        <p className="text-lg text-gray-600">Transform web content into optimized articles in 3 simple steps</p>
+        <p className="text-lg text-gray-600">Transform web content into optimized articles in just 3 simple steps</p>
         
         {/* Progress bar with step indicators */}
         <div className="space-y-3">
@@ -786,7 +840,7 @@ export function LinkContentWorkflow() {
               <div>
                 <h2 className="text-xl font-semibold">Content Preview</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Hiển thị như trên WordPress • Copy để lấy HTML
+                  Display as on WordPress • Copy to get HTML
                 </p>
               </div>
               <Button variant="outline" onClick={closePreview}>
@@ -802,6 +856,33 @@ export function LinkContentWorkflow() {
               
               {/* Rendered HTML Content - WordPress Style */}
               <div className="prose prose-lg max-w-none">
+                <style>
+                  {`
+                    .wordpress-content figure {
+                      text-align: center;
+                      margin: 1.5rem 0;
+                    }
+                    .wordpress-content figure img {
+                      max-width: 100%;
+                      height: auto;
+                      margin: 0 auto;
+                      display: block;
+                    }
+                    .wordpress-content figcaption {
+                      text-align: center;
+                      font-style: italic;
+                      color: #666;
+                      font-size: 0.9rem;
+                      margin-top: 0.5rem;
+                    }
+                    .wordpress-content img {
+                      max-width: 100%;
+                      height: auto;
+                      margin: 0 auto;
+                      display: block;
+                    }
+                  `}
+                </style>
                 <div 
                   className="wordpress-content"
                   style={{
@@ -995,11 +1076,13 @@ function URLsStep({
 function SettingsStep({ 
   llmSettings, 
   onSettingsChange,
-  crawledItems 
+  crawledItems,
+  currentLanguage
 }: {
   llmSettings: LLMSettings;
   onSettingsChange: (settings: LLMSettings) => void;
   crawledItems: URLItem[];
+  currentLanguage: string;
 }) {
   const [categories, setCategories] = useState<PhotoGalleryCategory[]>([]);
   const [folderSuggestions, setFolderSuggestions] = useState<string[]>([]);
@@ -1025,11 +1108,15 @@ function SettingsStep({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
   
-  // Load folder suggestions when category changes
+  // Load folder suggestions when category changes or imageSelection changes to folder
   useEffect(() => {
     if (llmSettings.imageSelection === 'folder' && llmSettings.imageCategory) {
       console.log('🔍 Loading folders for category:', llmSettings.imageCategory);
       loadFolderSuggestions(llmSettings.imageCategory);
+    } else if (llmSettings.imageSelection === 'folder' && !llmSettings.imageCategory) {
+      // If folder selection but no category, load a default category to get folders
+      console.log('🔍 No category selected, trying wedding category for folders');
+      loadFolderSuggestions('wedding');
     }
   }, [llmSettings.imageCategory, llmSettings.imageSelection]);
   
@@ -1146,7 +1233,7 @@ function SettingsStep({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                AI Provider
+                Nhà Cung Cấp AI
               </label>
               <select
                 value={llmSettings.preferredProvider}
@@ -1157,8 +1244,9 @@ function SettingsStep({
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 <option value="auto">🤖 Auto Selection</option>
-                <option value="openai">🧠 OpenAI GPT-4</option>
-                <option value="gemini">⚡ Google Gemini</option>
+                <option value="openai">🧠 OpenAI GPT-4o</option>
+                <option value="gemini">⚡ Google Gemini Flash</option>
+                <option value="claude">🎭 Claude 3 Haiku</option>
               </select>
             </div>
 
@@ -1183,7 +1271,22 @@ function SettingsStep({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Language
+                Word Count ({llmSettings.wordCount} words)
+              </label>
+              <input
+                type="range"
+                min="500"
+                max="3000"
+                step="100"
+                value={llmSettings.wordCount}
+                onChange={(e) => updateSetting('wordCount', parseInt(e.target.value, 10))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Content Language
               </label>
               <select
                 value={llmSettings.language}
@@ -1194,7 +1297,7 @@ function SettingsStep({
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 <option value="vietnamese">🇻🇳 Vietnamese</option>
-                <option value="english">🇸 English</option>
+                <option value="english">🇬🇧 English</option>
               </select>
             </div>
 
@@ -1202,23 +1305,22 @@ function SettingsStep({
             {llmSettings.contentType === 'wordpress_blog' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  WordPress Site Target
+                  Target WordPress Site
                 </label>
                 <select
-                  value={llmSettings.wordpressSiteTarget || 'auto'}
+                  value={llmSettings.wordpressSiteTarget || 'wedding'}
                   onChange={(e) => {
                     console.log('🌐 WordPress Site Target changing to:', e.target.value);
-                    updateSetting('wordpressSiteTarget', e.target.value as 'auto' | 'wedding' | 'yearbook' | 'general');
+                    updateSetting('wordpressSiteTarget', e.target.value as 'wedding' | 'yearbook' | 'general');
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 >
-                  <option value="auto">🤖 Auto (AI chọn site phù hợp)</option>
-                  <option value="wedding">💍 Wedding.guustudio.vn (Cưới/Pre-wedding)</option>
-                  <option value="yearbook">🎓 Guukyyeu.vn (Kỷ yếu)</option>
-                  <option value="general">📸 Guustudio.vn (Ảnh khác)</option>
+                  <option value="wedding">💍 Wedding.guustudio.vn (Wedding/Pre-wedding)</option>
+                  <option value="yearbook">🎓 Guukyyeu.vn (Yearbook)</option>
+                  <option value="general">📸 Guustudio.vn (Other Photos)</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
-                  AI sẽ phân tích nội dung và tự động chọn site phù hợp nếu chọn Auto
+                  Choose the site that matches your content type
                 </p>
               </div>
             )}
@@ -1280,7 +1382,7 @@ function SettingsStep({
 
             <div>
               <Label htmlFor="specialRequest" className="text-sm font-medium text-gray-700">
-                Special Request
+                Special Instructions
                 <span className="text-gray-500 text-xs ml-1">(optional)</span>
               </Label>
               <Input
@@ -1334,18 +1436,28 @@ function SettingsStep({
                   onChange={(e) => {
                     console.log('🖼️ Image Selection Method:', e.target.value);
                     updateSetting('imageSelection', e.target.value);
+                    
+                    // Auto-load folders when switching to folder selection
+                    if (e.target.value === 'folder') {
+                      const categoryToUse = llmSettings.imageCategory || 'wedding';
+                      console.log('🔍 Auto-loading folders for category:', categoryToUse);
+                      if (!llmSettings.imageCategory) {
+                        updateSetting('imageCategory', categoryToUse);
+                      }
+                      loadFolderSuggestions(categoryToUse);
+                    }
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md"
                 >
-                  <option value="category">📂 Chọn Theo Category </option>
-                  <option value="folder">🎯 Chọn Folder Cụ Thể</option>
+                  <option value="category">📂 By Category</option>
+                  <option value="folder">🎯 By Specific Folder</option>
                 </select>
               </div>
 
               {llmSettings.imageSelection === 'category' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Chọn Category 
+                    Select Category 
                   </label>
                   <select
                     value={llmSettings.imageCategory}
@@ -1355,23 +1467,32 @@ function SettingsStep({
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md"
                   >
-                    <option value="">🔍 Tự chọn</option>
+                    <option value="">🔍 Select category</option>
                     {categories.map((cat) => (
                       <option key={cat.id || cat.category_slug} value={cat.category_slug || cat.id}>
-                        {(cat.category_name || cat.name || cat.category || 'Unnamed')} ({cat.folder_count || cat.count || 0} folders)
+                        {(cat.category_name || cat.name || 'Unnamed')} ({cat.folder_count || cat.count || 0} folders)
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Hệ thống sẽ tự động chọn một folder ngẫu nhiên trong category này
-                  </p>
-                  
-                  {llmSettings.imageCategory && (
-                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
-                      <p className="text-xs text-amber-700">
-                        ⚠️ <strong>Chú ý:</strong> Hiện tại chỉ sử dụng ảnh thật từ Photo Gallery API.
+                  {llmSettings.imageCategory ? (
+                    <div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        System will automatically select a random folder within category "{llmSettings.imageCategory}"
+                      </p>
+                      <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-md">
+                        <p className="text-xs text-green-700">
+                          ✅ <strong>Category selected:</strong> All images will belong to category "{llmSettings.imageCategory}".
+                          <br />
+                          Only using real images from Photo Gallery API.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-xs text-red-700">
+                        ⚠️ <strong>No category selected!</strong> Please select a category to ensure images match the topic.
                         <br />
-                        Nếu không có featured images, content sẽ được tạo không có ảnh.
+                        If not selected, content will be generated without images.
                       </p>
                     </div>
                   )}
@@ -1380,39 +1501,86 @@ function SettingsStep({
 
               {llmSettings.imageSelection === 'folder' && (
                 <div className="space-y-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select Category 
+                    </label>
+                    <select
+                      value={llmSettings.imageCategory}
+                      onChange={(e) => {
+                        console.log('📂 Image Category for Folder Mode:', e.target.value);
+                        updateSetting('imageCategory', e.target.value);
+                        if (e.target.value) {
+                          loadFolderSuggestions(e.target.value);
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    >
+                      <option value="">🔍 Select category</option>
+                      {categories.map((cat) => (
+                        <option key={cat.id || cat.category_slug} value={cat.category_slug || cat.id}>
+                          {(cat.category_name || cat.name || 'Unnamed')} ({cat.folder_count || 0} folders)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
                   <Label>Specific Folder</Label>
                   <div className="relative" ref={folderDropdownRef}>
                     <Input
-                      placeholder="Search for folder..."
+                      placeholder={llmSettings.imageCategory ? 
+                        "Search for folder..." : 
+                        "Select a category first"
+                      }
                       value={folderSearchQuery}
                       onChange={(e) => {
                         setFolderSearchQuery(e.target.value);
                         setShowFolderDropdown(true);
                       }}
-                      onFocus={() => setShowFolderDropdown(true)}
+                      onFocus={() => {
+                        setShowFolderDropdown(true);
+                        // If no category selected, auto-load wedding folders
+                        if (!llmSettings.imageCategory) {
+                          updateSetting('imageCategory', 'wedding');
+                          loadFolderSuggestions('wedding');
+                        }
+                      }}
+                      disabled={!llmSettings.imageCategory}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     />
                     
-                    {showFolderDropdown && folderSuggestions.length > 0 && (
+                    {showFolderDropdown && (
                       <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
                         {isLoadingFolders ? (
-                          <div className="p-3 text-sm text-gray-500">Loading folders...</div>
-                        ) : filteredFolders.length > 0 ? (
-                          filteredFolders.map((folder, index) => (
-                            <button
-                              key={index}
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
-                              onClick={() => {
-                                updateSetting('specificFolder', folder);
-                                setFolderSearchQuery(folder);
-                                setShowFolderDropdown(false);
-                              }}
-                            >
-                              {folder}
-                            </button>
-                          ))
+                          <div className="p-3 text-sm text-gray-500">
+                            Loading folders...
+                          </div>
+                        ) : folderSuggestions.length > 0 ? (
+                          filteredFolders.length > 0 ? (
+                            filteredFolders.map((folder, index) => (
+                              <button
+                                key={index}
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+                                onClick={() => {
+                                  updateSetting('specificFolder', folder);
+                                  setFolderSearchQuery(folder);
+                                  setShowFolderDropdown(false);
+                                }}
+                              >
+                                {folder}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="p-3 text-sm text-gray-500">
+                              No folders match "{folderSearchQuery}"
+                            </div>
+                          )
                         ) : (
                           <div className="p-3 text-sm text-gray-500">
-                            {folderSearchQuery ? 'No matching folders found' : 'No folders available - waiting for Photo Gallery team to add featured images'}
+                            {folderSearchQuery ? 
+                              'No matching folders found' : 
+                              'No folders available - waiting for Photo Gallery team to add featured images'
+                            }
                           </div>
                         )}
                       </div>
@@ -1439,7 +1607,7 @@ function SettingsStep({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Số lượng ảnh
+                  Number of Images
                 </label>
                 <select
                   value={llmSettings.maxImages}
@@ -1450,52 +1618,92 @@ function SettingsStep({
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md"
                 >
-                  <option value="auto">🤖 Auto (để LLM tự quyết định)</option>
-                  <option value={0}>Không ảnh</option>
-                  <option value={1}>1 ảnh</option>
-                  <option value={2}>2 ảnh</option>
-                  <option value={3}>3 ảnh</option>
-                  <option value={4}>4 ảnh</option>
-                  <option value={5}>5 ảnh</option>
-                  <option value={6}>6 ảnh</option>
-                  <option value={7}>7 ảnh</option>
-                  <option value={8}>8 ảnh</option>
-                  <option value={9}>9 ảnh</option>
-                  <option value={10}>10 ảnh</option>
-                  <option value={12}>12 ảnh</option>
-                  <option value={15}>15 ảnh (tối đa)</option>
+                  <option value="auto">🤖 Auto (let LLM decide)</option>
+                  <option value={0}>No images</option>
+                  <option value={1}>1 image</option>
+                  <option value={2}>2 images</option>
+                  <option value={3}>3 images</option>
+                  <option value={4}>4 images</option>
+                  <option value={5}>5 images</option>
+                  <option value={6}>6 images</option>
+                  <option value={7}>7 images</option>
+                  <option value={8}>8 images</option>
+                  <option value={9}>9 images</option>
+                  <option value={10}>10 images</option>
+                  <option value={12}>12 images</option>
+                  <option value={15}>15 images (maximum)</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
                   {llmSettings.maxImages === 'auto' 
-                    ? 'LLM sẽ tự quyết định số lượng ảnh phù hợp với nội dung'
-                    : `LLM sẽ tính toán phân bổ ${llmSettings.maxImages} ảnh vào bài viết`
+                    ? 'LLM will decide the appropriate number of images for the content'
+                    : `LLM will calculate distribution of ${llmSettings.maxImages} images in the article`
                   }
                 </p>
               </div>
 
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="ensureConsistency"
-                  checked={llmSettings.ensureConsistency}
-                  onChange={(e) => {
-                    console.log('🔒 Ensure Consistency:', e.target.checked);
-                    updateSetting('ensureConsistency', e.target.checked.toString());
-                  }}
-                  className="mr-2"
-                />
-                <label htmlFor="ensureConsistency" className="text-sm">
-                  🔒 Đảm bảo tất cả ảnh từ cùng 1 album (khuyến nghị)
-                </label>
+              <div className="space-y-3">
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="ensureConsistency"
+                    checked={llmSettings.ensureConsistency}
+                    onChange={(e) => {
+                      console.log('🔒 Ensure Consistency:', e.target.checked);
+                      updateSetting('ensureConsistency', e.target.checked);
+                    }}
+                    className="mr-2"
+                  />
+                  <label htmlFor="ensureConsistency" className="text-sm">
+                    🔒 Ensure all images from same category
+                  </label>
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="ensureAlbumConsistency"
+                    checked={llmSettings.ensureAlbumConsistency}
+                    onChange={(e) => {
+                      console.log('📁 Ensure Album Consistency:', e.target.checked);
+                      updateSetting('ensureAlbumConsistency', e.target.checked);
+                    }}
+                    className="mr-2"
+                  />
+                  <label htmlFor="ensureAlbumConsistency" className="text-sm">
+                    📁 Ensure all images from same album (recommended)
+                  </label>
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="preferPortrait"
+                    checked={llmSettings.preferPortrait}
+                    onChange={(e) => {
+                      console.log('👤 Prefer Portrait:', e.target.checked);
+                      updateSetting('preferPortrait', e.target.checked);
+                    }}
+                    className="mr-2"
+                  />
+                  <label htmlFor="preferPortrait" className="text-sm">
+                    👤 Prefer portrait images
+                  </label>
+                </div>
+
+                <div className="text-xs text-gray-500 mt-2 pl-6">
+                  <p>• Category consistency: All images belong to the same category</p>
+                  <p>• Album consistency: All images from the same folder/album</p>
+                  <p>• Portrait priority: Prefer portraits, fallback to featured images</p>
+                </div>
               </div>
 
               {llmSettings.imageSelection === 'category' && (
                 <div className="bg-blue-50 p-3 rounded-md">
                   <p className="text-sm text-blue-800">
                     <strong>💡 Real Images Only:</strong>
-                    <br />• Chọn category → Hệ thống tự động random 1 folder trong category
-                    <br />• Chỉ sử dụng ảnh thật từ Photo Gallery API
-                    <br />• Không có ảnh → Content sẽ tạo không có ảnh
+                    <br />• Select category → System automatically randomizes 1 folder within category
+                    <br />• Only using real images from Photo Gallery API
+                    <br />• No images → Content will be generated without images
                   </p>
                 </div>
               )}
@@ -1504,9 +1712,9 @@ function SettingsStep({
                 <div className="bg-green-50 p-3 rounded-md">
                   <p className="text-sm text-green-800">
                     <strong>🎯 Real Images Only:</strong>
-                    <br />• Tìm kiếm chính xác folder cần dùng
-                    <br />• Chỉ sử dụng ảnh thật từ Photo Gallery API
-                    <br />• Không có ảnh → Content sẽ tạo không có ảnh
+                    <br />• Search for specific folder to use
+                    <br />• Only using real images from Photo Gallery API
+                    <br />• No images → Content will be generated without images
                   </p>
                 </div>
               )}
@@ -1582,7 +1790,8 @@ function GenerationStep({
   crawledItems,
   llmSettings,
   approvedStats,
-  onClearApprovedContent
+  onClearApprovedContent,
+  onSettingsChange
 }: { 
   generatedContent: GeneratedContentItem[];
   isGenerating: boolean;
@@ -1600,6 +1809,7 @@ function GenerationStep({
     currentSite: string;
   };
   onClearApprovedContent: () => void;
+  onSettingsChange: (settings: LLMSettings) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -1650,7 +1860,6 @@ function GenerationStep({
               <div className="bg-white p-3 rounded-lg border border-blue-100">
                 <span className="text-blue-700 font-medium text-xs uppercase tracking-wide">WordPress Site</span>
                 <p className="text-blue-900 font-semibold text-sm">
-                  {llmSettings.wordpressSiteTarget === 'auto' && '🤖 Auto'}
                   {llmSettings.wordpressSiteTarget === 'wedding' && '💍 Wedding'}
                   {llmSettings.wordpressSiteTarget === 'yearbook' && '🎓 Yearbook'}
                   {llmSettings.wordpressSiteTarget === 'general' && '📸 General'}
@@ -1814,7 +2023,7 @@ function GenerationStep({
                       <div className="flex items-center space-x-2 text-sm text-green-600">
                         <CheckCircleIcon className="w-4 h-4" />
                         <span>
-                          Published on {new Date(content.publishedAt!).toLocaleString('vi-VN')}
+                          Published on {new Date(content.publishedAt!).toLocaleString('en-US')}
                           {content.publishedSite && ` • ${content.publishedSite}`}
                         </span>
                       </div>
@@ -1827,7 +2036,7 @@ function GenerationStep({
                             className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
                           >
                             <GlobeAltIcon className="w-4 h-4 mr-2" />
-                            Xem Bài Viết
+                            View Post
                           </Button>
                           <Button 
                             size="sm" 
@@ -1839,6 +2048,61 @@ function GenerationStep({
                           </Button>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {content.status === 'failed' && (
+                    <div className="space-y-3">
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <div className="flex items-start space-x-3">
+                          <ExclamationCircleIcon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1 space-y-2">
+                            <p className="font-medium text-red-800">Content generation failed</p>
+                            <div className="text-sm text-red-700 whitespace-pre-wrap">
+                              {content.body || 'Unknown error occurred'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <div className="flex space-x-2">
+                          <Button 
+                            size="sm"
+                            onClick={() => onRegenerate(content.id)}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                          >
+                            <ArrowPathIcon className="w-4 h-4 mr-2" />
+                            Try Again
+                          </Button>
+                          <Button 
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              // Try with different provider
+                              const currentProvider = llmSettings.preferredProvider;
+                              const alternativeProvider = currentProvider === 'openai' ? 'gemini' : 
+                                                          currentProvider === 'gemini' ? 'claude' : 'openai';
+                              toast(`Switching to ${alternativeProvider} provider...`);
+                              // Update settings and regenerate
+                              onSettingsChange?.({
+                                ...llmSettings,
+                                preferredProvider: alternativeProvider as 'auto' | 'openai' | 'gemini' | 'claude'
+                              });
+                              setTimeout(() => onRegenerate(content.id), 100);
+                            }}
+                          >
+                            <ArrowsRightLeftIcon className="w-4 h-4 mr-2" />
+                            Try Different AI
+                          </Button>
+                        </div>
+                        
+                        <div className="text-xs text-gray-500">
+                          {content.metadata?.aiModel && (
+                            <span>Failed with: {content.metadata.aiModel}</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1945,7 +2209,7 @@ function ManagementStep({
           <CardTitle className="flex items-center space-x-2">
             <ChartBarIcon className="w-5 h-5" />
             <span>AI Learning Progress</span>
-            <Badge variant="outline">
+            <Badge variant="info">
               {getSiteIcon(approvedStats.currentSite)} {approvedStats.currentSite}
             </Badge>
           </CardTitle>

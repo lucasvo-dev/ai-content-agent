@@ -9,9 +9,12 @@ import { LinkContentController } from './controllers/LinkContentController.js';
 import { WordPressMultiSiteController } from './controllers/WordPressMultiSiteController.js';
 import { PhotoGalleryService } from './services/PhotoGalleryService.js';
 import type { ContentGenerationRequest } from './types/content.js';
+import { logger } from './utils/logger.js';
+import { WordPressMultiSiteService } from './services/WordPressMultiSiteService.js';
+import axios from 'axios';
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // CORS configuration
 app.use(cors({
@@ -324,14 +327,44 @@ async function insertImagesIntoContent(content: any, imageSettings: any): Promis
 
     console.log(`🖼️ Found ${requiredImages} image placeholders. Fetching images...`);
 
-    // 2. Fetch images using the PhotoGalleryService
+    // 2. Fetch images using the PhotoGalleryService with enhanced options
     let selectedImages: string[] = [];
-    if (imageSettings.imageSelection === 'specific-folder' && imageSettings.specificFolder) {
-      selectedImages = await photoGalleryService.getImagesFromFolder(imageSettings.specificFolder, requiredImages);
-    } else if (imageSettings.imageSelection === 'auto-category' && imageSettings.imageCategory) {
-      selectedImages = await photoGalleryService.getImagesByCategory(imageSettings.imageCategory, requiredImages);
+    console.log('🔍 Image Selection Details:', JSON.stringify(imageSettings, null, 2));
+    
+    const imageOptions = {
+      ensureAlbumConsistency: imageSettings.ensureAlbumConsistency || false,
+      preferPortrait: imageSettings.preferPortrait || false,
+      categorySlug: imageSettings.imageCategory
+    };
+    
+    if ((imageSettings.imageSelection === 'folder' || imageSettings.imageSelection === 'specific-folder') && imageSettings.specificFolder) {
+      console.log(`📁 Using specific folder: ${imageSettings.specificFolder}`);
+      console.log(`🎯 Options: Album consistency: ${imageOptions.ensureAlbumConsistency}, Portrait: ${imageOptions.preferPortrait}`);
+      selectedImages = await photoGalleryService.getImagesFromFolder(
+        imageSettings.specificFolder, 
+        requiredImages,
+        {
+          categorySlug: imageOptions.categorySlug,
+          preferPortrait: imageOptions.preferPortrait
+        }
+      );
+    } else if ((imageSettings.imageSelection === 'category' || imageSettings.imageSelection === 'auto-category') && imageSettings.imageCategory) {
+      console.log(`📂 Using category: ${imageSettings.imageCategory}`);
+      console.log(`🎯 Options: Album consistency: ${imageOptions.ensureAlbumConsistency}, Portrait: ${imageOptions.preferPortrait}`);
+      selectedImages = await photoGalleryService.getImagesByCategory(
+        imageSettings.imageCategory, 
+        requiredImages,
+        {
+          ensureAlbumConsistency: imageOptions.ensureAlbumConsistency,
+          preferPortrait: imageOptions.preferPortrait
+        }
+      );
     } else {
-      selectedImages = await photoGalleryService.getRandomImages(requiredImages);
+      console.log('⚠️ No valid category or folder specified. Skipping image selection.');
+      console.log('📋 Available options:');
+      console.log('  - Set imageCategory to a valid category slug');
+      console.log('  - Set specificFolder with a folder path');
+      selectedImages = [];
     }
 
     if (selectedImages.length === 0) {
@@ -363,7 +396,7 @@ async function insertImagesIntoContent(content: any, imageSettings: any): Promis
 
 <figure class="wp-block-image size-large" style="text-align:center">
   <img src="${imageUrl}" alt="${content.title || 'Content Image'}" style="max-width:750px;height:auto" onerror="this.onerror=null;this.src='${fallbackUrl}';this.style.maxWidth='750px';" onload="${onLoadCheck}" />
-  <figcaption>Illustration for ${content.title || 'this content'}</figcaption>
+  <figcaption>${content.title || 'Beautiful photography by Guu Studio'}</figcaption>
 </figure>
 
 `;
@@ -392,10 +425,16 @@ async function insertImagesIntoContent(content: any, imageSettings: any): Promis
 }
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Development server running on http://localhost:${PORT}`);
-  console.log(`📖 Health check: http://localhost:${PORT}/api/v1/health`);
-  console.log(`🤖 AI health: http://localhost:${PORT}/api/v1/ai/health`);
-  const providers = aiService.getAvailableProviders();
-  console.log(`🧠 Available providers: ${providers.map(p => p.provider).join(', ')}`);
+app.listen(PORT, async () => {
+  logger.info(`🚀 Development server running on http://localhost:${PORT}`);
+  
+  try {
+    // Note: This service is initialized but methods are private.
+    // To use it, methods would need to be exposed or called from within the class.
+    const multiSiteService = new WordPressMultiSiteService();
+    // await multiSiteService.initializeSites(); // This is private
+    logger.info('WordPressMultiSiteService instance created.');
+  } catch (error) {
+    logger.error('Failed to instantiate WordPressMultiSiteService:', error);
+  }
 }); 

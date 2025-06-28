@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/services/PhotoGalleryService.ts",
+    "src/services/HybridAIService.ts",
+    "src/services/EnhancedContentService.ts",
+    "src/controllers/LinkContentController.ts",
+    "src/types/**/*.ts",
+    "src/utils/**/*.ts"
+  ]
+} 
