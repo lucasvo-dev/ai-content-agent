@@ -85,7 +85,7 @@ export interface Content {
 
 export enum ContentType {
   BLOG_POST = "blog_post",
-  SOCIAL_MEDIA = "social_media", 
+  SOCIAL_MEDIA = "social_media",
   EMAIL = "email",
   AD_COPY = "ad_copy",
 }

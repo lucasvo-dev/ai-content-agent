@@ -138,7 +138,7 @@ export class WordPressMultiSiteController {
       message: `Successfully published to ${result.totalPublished} site(s).`,
       data: {
         url: result.mainResult?.url, // The URL of the published post
-        siteName: result.mainResult?.siteName,
+      siteName: result.mainResult?.siteName,
         postId: result.mainResult?.postId
       }
     });

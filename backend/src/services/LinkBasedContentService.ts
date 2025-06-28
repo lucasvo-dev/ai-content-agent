@@ -292,7 +292,7 @@ Please create new content based on this source material.`,
       // Use EnhancedContentService to generate content with images (DRY principle)
       const result = await this.enhancedContentService.generateContentWithImages(generationRequest);
 
-      item.generatedContent = {
+             item.generatedContent = {
         ...result,
         status: ContentStatus.DRAFT,
         sourceReference: {
@@ -301,7 +301,7 @@ Please create new content based on this source material.`,
           usedAsReference: true,
           rewriteStyle: 'improved'
         }
-      };
+       };
 
       item.status = 'generated';
       logger.info(`Successfully generated content with images for item ${item.id}, ${result.metadata?.wordCount || 0} words`);

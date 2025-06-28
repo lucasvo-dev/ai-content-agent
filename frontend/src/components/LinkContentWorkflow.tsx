@@ -81,6 +81,7 @@ interface GeneratedContentItem {
   metadata?: {
     qualityScore?: number;
     aiModel?: string;
+    featuredImage?: string;
   };
   publishedAt?: string;
   publishedUrl?: string;
@@ -107,7 +108,7 @@ export function LinkContentWorkflow() {
   const [wordpressSites, setWordPressSites] = useState<WordPressSite[]>([]);
   const [publishSiteSelections, setPublishSiteSelections] = useState<Record<string, string>>({});
   const [regenProviderSelections, setRegenProviderSelections] = useState<Record<string, 'auto' | 'openai' | 'gemini' | 'claude'>>({});
-
+  
   // Simplified settings with defaults
   const [llmSettings, setLlmSettings] = useState<LLMSettings>({
     contentType: 'wordpress_blog',
@@ -735,7 +736,7 @@ export function LinkContentWorkflow() {
       case 1:
         return (
           <SettingsStep 
-            llmSettings={llmSettings} 
+            llmSettings={llmSettings}
             onSettingsChange={setLlmSettings}
             crawledItems={crawledItems}
             currentLanguage="vietnamese"
@@ -874,68 +875,50 @@ export function LinkContentWorkflow() {
                 <h3 className="text-lg font-medium text-gray-900">{previewContent.title}</h3>
                 <p className="text-sm text-gray-500 mt-1">Source: {previewContent.sourceUrl}</p>
               </div>
+
+              {previewContent.metadata?.featuredImage && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-600">Featured Image</h4>
+                  <img
+                    src={previewContent.metadata.featuredImage}
+                    alt="Featured Image"
+                    className="rounded-lg border object-cover w-full max-h-64"
+                  />
+                </div>
+              )}
               
               {/* Rendered HTML Content - WordPress Style */}
-              <div className="prose prose-lg max-w-none">
-                <style>
-                  {`
-                    .wordpress-content figure {
-                      text-align: center;
-                      margin: 1.5rem 0;
-                    }
-                    .wordpress-content figure img {
-                      max-width: 100%;
-                      height: auto;
-                      margin: 0 auto;
-                      display: block;
-                    }
-                    .wordpress-content figcaption {
-                      text-align: center;
-                      font-style: italic;
-                      color: #666;
-                      font-size: 0.9rem;
-                      margin-top: 0.5rem;
-                    }
-                    .wordpress-content img {
-                      max-width: 100%;
-                      height: auto;
-                      margin: 0 auto;
-                      display: block;
-                    }
-                  `}
-                </style>
-                <div 
-                  className="wordpress-content"
-                  style={{
-                    lineHeight: '1.6',
-                    fontSize: '16px',
-                    color: '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                  }}
-                  dangerouslySetInnerHTML={{ 
-                    __html: (() => {
-                      // Enhanced HTML cleaning for proper preview
-                      let cleanedContent = previewContent.body
-                        .replace(/^```html\s*/i, '') // Remove ```html at start
-                        .replace(/\s*```\s*$/i, '')   // Remove ``` at end
-                        .replace(/&lt;/g, '<')        // Decode HTML entities
-                        .replace(/&gt;/g, '>')
-                        .replace(/&amp;/g, '&')
-                        .replace(/&quot;/g, '"')
-                        .replace(/&#39;/g, "'")
-                        .replace(/&nbsp;/g, ' ');
-                      
-                      // Additional cleanup for artifacts
-                      cleanedContent = cleanedContent
-                        .replace(/^\s*`?html`?\s*/i, '') // Remove any remaining html artifacts
-                        .replace(/\s*`\s*$/i, '')         // Remove trailing backticks
-                        .trim();
-                      
-                      return cleanedContent;
-                    })()
-                  }}
-                />
-              </div>
+              <article
+                className="prose prose-lg max-w-none"
+                style={{
+                  lineHeight: '1.6',
+                  fontSize: '16px',
+                  color: '#333',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}
+                dangerouslySetInnerHTML={{ 
+                  __html: (() => {
+                    // Enhanced HTML cleaning for proper preview
+                    let cleanedContent = previewContent.body
+                      .replace(/^```html\s*/i, '') // Remove ```html at start
+                      .replace(/\s*```\s*$/i, '')   // Remove ``` at end
+                      .replace(/&lt;/g, '<')        // Decode HTML entities
+                      .replace(/&gt;/g, '>')
+                      .replace(/&amp;/g, '&')
+                      .replace(/&quot;/g, '"')
+                      .replace(/&#39;/g, "'")
+                      .replace(/&nbsp;/g, ' ');
+                    
+                    // Additional cleanup for artifacts
+                    cleanedContent = cleanedContent
+                      .replace(/^\s*`?html`?\s*/i, '') // Remove any remaining html artifacts
+                      .replace(/\s*`\s*$/i, '')         // Remove trailing backticks
+                      .trim();
+                    
+                    return cleanedContent;
+                  })()
+                }}
+              />
             </div>
             
             <div className="border-t p-6 flex justify-between items-center">
@@ -953,22 +936,22 @@ export function LinkContentWorkflow() {
                       [previewContent.id]: e.target.value as any
                     }))}
                     className="text-sm px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
+                >
                     <option value="auto">🤖 Auto</option>
                     <option value="claude">🎭 Claude</option>
                     <option value="openai">🧠 OpenAI</option>
                     <option value="gemini">⚡ Gemini</option>
                   </select>
-                  <Button 
-                    variant="outline"
-                    onClick={() => {
+                <Button 
+                  variant="outline"
+                  onClick={() => {
                       handleRegenerate(previewContent.id, regenProviderSelections[previewContent.id] || 'auto');
-                      closePreview();
-                    }}
-                  >
-                    <ArrowPathIcon className="w-4 h-4 mr-2" />
-                    Regenerate
-                  </Button>
+                    closePreview();
+                  }}
+                >
+                  <ArrowPathIcon className="w-4 h-4 mr-2" />
+                  Regenerate
+                </Button>
                 </div>
 
                 {/* Publish with Site Selection */}
@@ -988,16 +971,16 @@ export function LinkContentWorkflow() {
                       </option>
                     ))}
                   </select>
-                  <Button 
-                    onClick={() => {
+                <Button 
+                  onClick={() => {
                       handlePublish(previewContent.id, publishSiteSelections[previewContent.id]);
-                      closePreview();
-                    }}
+                    closePreview();
+                  }}
                     disabled={!publishSiteSelections[previewContent.id]}
-                  >
+                >
                     <CloudArrowUpIcon className="w-4 h-4 mr-2" />
                     Publish to WordPress
-                  </Button>
+                </Button>
                 </div>
               </div>
             </div>
@@ -1479,13 +1462,13 @@ function SettingsStep({
                   </select>
                   {llmSettings.imageCategory ? (
                     <div>
-                      <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                         System will automatically select a random folder within category "{llmSettings.imageCategory}"
                       </p>
                       <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-md">
                         <p className="text-xs text-green-700">
                           ✅ <strong>Category selected:</strong> All images will belong to category "{llmSettings.imageCategory}".
-                          <br />
+                        <br />
                           Only using real images from Photo Gallery API.
                         </p>
                       </div>
@@ -1560,21 +1543,21 @@ function SettingsStep({
                           </div>
                         ) : folderSuggestions.length > 0 ? (
                           filteredFolders.length > 0 ? (
-                            filteredFolders.map((folder, index) => (
-                              <button
-                                key={index}
-                                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
-                                onClick={() => {
-                                  updateSetting('specificFolder', folder);
-                                  setFolderSearchQuery(folder);
-                                  setShowFolderDropdown(false);
-                                }}
-                              >
-                                {folder}
-                              </button>
-                            ))
-                          ) : (
-                            <div className="p-3 text-sm text-gray-500">
+                          filteredFolders.map((folder, index) => (
+                            <button
+                              key={index}
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+                              onClick={() => {
+                                updateSetting('specificFolder', folder);
+                                setFolderSearchQuery(folder);
+                                setShowFolderDropdown(false);
+                              }}
+                            >
+                              {folder}
+                            </button>
+                          ))
+                        ) : (
+                          <div className="p-3 text-sm text-gray-500">
                               No folders match "{folderSearchQuery}"
                             </div>
                           )
@@ -1645,20 +1628,20 @@ function SettingsStep({
               </div>
 
               <div className="space-y-3">
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="ensureConsistency"
-                    checked={llmSettings.ensureConsistency}
-                    onChange={(e) => {
-                      console.log('🔒 Ensure Consistency:', e.target.checked);
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="ensureConsistency"
+                  checked={llmSettings.ensureConsistency}
+                  onChange={(e) => {
+                    console.log('🔒 Ensure Consistency:', e.target.checked);
                       updateSetting('ensureConsistency', e.target.checked);
-                    }}
-                    className="mr-2"
-                  />
-                  <label htmlFor="ensureConsistency" className="text-sm">
+                  }}
+                  className="mr-2"
+                />
+                <label htmlFor="ensureConsistency" className="text-sm">
                     🔒 Ensure all images from same category
-                  </label>
+                </label>
                 </div>
 
                 <div className="flex items-center">
@@ -1959,23 +1942,23 @@ function GenerationStep({
                   {(content.status === 'generated' || content.status === 'approved') && (
                     <div className="space-y-3">
                        <div className="flex items-center space-x-2">
-                          <Button 
-                            size="sm"
+                      <Button 
+                        size="sm" 
                             variant={content.status === 'approved' ? 'primary' : 'outline'}
-                            onClick={() => onApprove(content.id)}
+                        onClick={() => onApprove(content.id)}
                             className={content.status === 'approved' ? 'bg-blue-600 hover:bg-blue-700' : ''}
-                          >
-                            <CheckCircleIcon className="w-4 h-4 mr-2" />
+                      >
+                        <CheckCircleIcon className="w-4 h-4 mr-2" />
                             {content.status === 'approved' ? 'Approved' : 'Approve'}
-                          </Button>
-                           <Button 
-                            size="sm" 
-                            variant="outline"
-                            onClick={() => onPreview(content.id)}
-                          >
-                            <EyeIcon className="w-4 h-4 mr-2" />
-                            Preview
-                          </Button>
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => onPreview(content.id)}
+                      >
+                        <EyeIcon className="w-4 h-4 mr-2" />
+                        Preview
+                      </Button>
                        </div>
                        
                        <div className="flex items-end space-x-2 pt-2 border-t">
@@ -1993,13 +1976,13 @@ function GenerationStep({
                                   <option key={site.id} value={site.id}>{site.name}</option>
                                 ))}
                               </select>
-                              <Button
-                                size="sm"
+                      <Button 
+                        size="sm"
                                 onClick={() => onPublish(content.id, publishSiteSelections[content.id])}
                                 disabled={!publishSiteSelections[content.id]}
-                              >
+                      >
                                 <CloudArrowUpIcon className="w-4 h-4" />
-                              </Button>
+                      </Button>
                            </div>
                          </div>
                          
@@ -2017,13 +2000,13 @@ function GenerationStep({
                                 <option value="openai">🧠 OpenAI</option>
                                 <option value="gemini">⚡ Gemini</option>
                               </select>
-                              <Button
-                                size="sm"
-                                variant="outline"
+                      <Button 
+                        size="sm" 
+                        variant="outline"
                                 onClick={() => onRegenerate(content.id, regenProviderSelections[content.id] || 'auto')}
-                              >
+                      >
                                 <ArrowPathIcon className="w-4 h-4" />
-                              </Button>
+                      </Button>
                            </div>
                          </div>
                        </div>

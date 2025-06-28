@@ -2,8 +2,8 @@ import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
 import {
-  ContentGenerationRequest,
-  GeneratedContent,
+  ContentGenerationRequest, 
+  GeneratedContent, 
   ContentMetadata,
   BrandVoiceConfig,
   ContentStatus,
@@ -275,13 +275,13 @@ export class HybridAIService {
     }
     if (this.isProviderAvailable('openai')) {
         console.log(`🤖 Auto-selecting OpenAI (Default priority)`);
-      return 'openai';
-    }
+        return 'openai';
+      }
     if (this.isProviderAvailable('gemini')) {
         console.log(`🤖 Auto-selecting Gemini (Default priority)`);
       return 'gemini';
     }
-
+    
     console.log('⚠️ No providers available for auto-selection.');
     throw new Error('No AI providers available');
   }
@@ -837,9 +837,9 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
          costPerToken: 0.0015, // Average cost per 1K tokens
          maxTokens: 200000,
          recommended: this.provider === 'claude',
-         status: 'available'
-       });
-     }
+        status: 'available'
+      });
+    }
     
     return models;
   }

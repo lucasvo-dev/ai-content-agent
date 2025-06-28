@@ -428,7 +428,7 @@ export class AIController {
 
       // Generate new content
       const generatedContent = await this.aiService.generateContent(request);
-
+      
       res.json({
         success: true,
         data: generatedContent,

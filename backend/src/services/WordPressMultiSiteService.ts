@@ -289,47 +289,47 @@ export class WordPressMultiSiteService {
     const errors: string[] = [];
     let mainResult: MultiSitePublishingResult['mainResult'];
 
-    // Prepare WordPress post data
-    const postData = {
-      title: request.title,
-      body: request.body,
-      excerpt: request.excerpt || '',
-      categories: request.categories || [],
-      tags: request.tags || [],
-      status: request.status || 'publish' as const,
-      featuredImageUrl: request.featuredImageUrl,
-      seoTitle: request.seoTitle,
-      seoDescription: request.seoDescription
-    };
+      // Prepare WordPress post data
+      const postData = {
+        title: request.title,
+        body: request.body,
+        excerpt: request.excerpt || '',
+        categories: request.categories || [],
+        tags: request.tags || [],
+        status: request.status || 'publish' as const,
+        featuredImageUrl: request.featuredImageUrl,
+        seoTitle: request.seoTitle,
+        seoDescription: request.seoDescription
+      };
 
-    // Prepare content object for WordPress
-    const contentObject = {
-      id: 'temp-id',
-      title: postData.title,
-      body: postData.body,
-      excerpt: postData.excerpt,
-      type: 'BLOG_POST' as any,
-      status: 'APPROVED' as any,
-      authorId: 'system',
-      projectId: 'multi-site',
-      metadata: {
-        keywords: postData.tags,
+      // Prepare content object for WordPress
+      const contentObject = {
+        id: 'temp-id',
+        title: postData.title,
+        body: postData.body,
+        excerpt: postData.excerpt,
+        type: 'BLOG_POST' as any,
+        status: 'APPROVED' as any,
+        authorId: 'system',
+        projectId: 'multi-site',
+        metadata: {
+          keywords: postData.tags,
+          seoTitle: postData.seoTitle,
+          seoDescription: postData.seoDescription
+        },
+        aiGenerated: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const publishSettings = {
+      status: (postData.status === 'pending' ? 'draft' : postData.status) as 'draft' | 'publish' | 'private',
+        categories: postData.categories,
+        tags: postData.tags,
+        featuredImageUrl: postData.featuredImageUrl,
         seoTitle: postData.seoTitle,
         seoDescription: postData.seoDescription
-      },
-      aiGenerated: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    const publishSettings = {
-      status: (postData.status === 'pending' ? 'draft' : postData.status) as 'draft' | 'publish' | 'private',
-      categories: postData.categories,
-      tags: postData.tags,
-      featuredImageUrl: postData.featuredImageUrl,
-      seoTitle: postData.seoTitle,
-      seoDescription: postData.seoDescription
-    };
+      };
 
     try {
       // Publish to target site

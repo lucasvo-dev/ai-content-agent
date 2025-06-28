@@ -46,21 +46,28 @@ export class EnhancedContentService {
       
       logger.info(`✅ Found ${images.length} images. Enhancing content...`);
 
+      // Select featured image before modifying the content body
+      const featuredImage = this.selectFeaturedImage(images, request.type);
+      if (featuredImage) {
+        baseContent.metadata.featuredImage = featuredImage.full_image_url;
+      }
+
       if (request.type === "blog_post") {
         baseContent.body = this.insertImagesIntoContent(baseContent.body, images, request);
         
-        baseContent.metadata.featuredImage = images[0].full_image_url;
         baseContent.metadata.galleryImages = images.map(img => {
           const altText = img.metadata?.alt_text || request.topic;
           return {
             url: img.full_image_url,
             alt_text: altText,
-            caption: this.generateSmartCaption(img, request, altText)
+            caption: this.generateSmartCaption(img, request, altText),
+            width: img.metadata?.width,
+            height: img.metadata?.height
           };
         });
 
       } else if (request.type === "social_media") {
-        baseContent.metadata.featuredImage = images[0].full_image_url;
+        // For social media, we just set the featured image, no insertion
       }
 
       logger.info('✅ Content generation with images complete.');
@@ -166,6 +173,44 @@ ${caption ? `<figcaption class="wp-element-caption">${caption}</figcaption>` : '
   private getImageLimit(maxImages?: number | "auto"): number {
     if (maxImages === "auto") return 5;
     return maxImages || 3;
+  }
+
+  /**
+   * Selects a featured image based on specific criteria.
+   * - Prefers horizontal images from the provided list.
+   * - Falls back to fetching a new horizontal image if none are found.
+   */
+  private selectFeaturedImage(
+    images: PhotoGalleryImage[],
+    contentType: 'blog_post' | 'social_media' | 'email' | 'ad_copy'
+  ): PhotoGalleryImage | undefined {
+    if (!images || images.length === 0) {
+      return undefined;
+    }
+
+    // Find horizontal images (landscape)
+    const horizontalImages = images.filter(
+      (img) => (img.metadata?.width ?? 0) > (img.metadata?.height ?? 0)
+    );
+
+    if (horizontalImages.length > 0) {
+      // Return a random horizontal image from the list
+      const randomIndex = Math.floor(Math.random() * horizontalImages.length);
+      logger.info(`✅ Selected a random horizontal featured image from the existing list.`);
+      return horizontalImages[randomIndex];
+    }
+
+    // Fallback for blog posts: if no horizontal images, just pick the first one.
+    // We avoid fetching new images to prevent surprises in the post body.
+    if (contentType === "blog_post" && images.length > 0) {
+      logger.warn(`⚠️ No horizontal images found in the list for blog post. Falling back to the first image.`);
+      return images[0];
+    }
+    
+    // For other content types, we can just return the first image as well.
+    // A specific fetch for a horizontal image could be added here if needed for social media.
+    logger.warn(`⚠️ No horizontal images found. Using the first available image as featured image.`);
+    return images[0];
   }
 
   // ... other helper functions can be removed if they are not used anymore ...

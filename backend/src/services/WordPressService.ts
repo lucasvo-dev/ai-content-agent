@@ -264,37 +264,38 @@ export class WordPressService {
    * Prepare WordPress post data from content
    */
   private async preparePostData(content: Content, settings: PublishSettings): Promise<any> {
+    const { status, scheduledDate, categories, tags } = settings;
+
     const postData: any = {
       title: content.title,
       content: content.body,
       excerpt: content.excerpt || this.generateExcerpt(content.body),
-      status: settings.status || 'draft',
+      status: status || 'draft',
     };
 
-    // Handle scheduled publishing
-    if (settings.scheduledDate) {
-      postData.date = settings.scheduledDate.toISOString();
-      postData.status = 'future';
+    if (scheduledDate) {
+      postData.date = scheduledDate.toISOString();
+    }
+    
+    if (categories && categories.length > 0) {
+      postData.categories = await this.resolveCategoryIds(categories);
     }
 
-    // Handle categories
-    if (settings.categories && settings.categories.length > 0) {
-      postData.categories = await this.resolveCategoryIds(settings.categories);
+    if (tags && tags.length > 0) {
+      postData.tags = await this.resolveTagIds(tags);
     }
-
-    // Handle tags
-    if (settings.tags && settings.tags.length > 0) {
-      postData.tags = await this.resolveTagIds(settings.tags);
-    }
-
-    // Handle featured image
-    if (settings.featuredImageUrl) {
+    
+    // Upload and set the featured image if available
+    const featuredImageUrl = content.metadata?.featuredImage;
+    if (featuredImageUrl) {
       try {
-        const mediaId = await this.uploadFeaturedImage(settings.featuredImageUrl, content.title);
-        postData.featured_media = mediaId;
+        logger.info(`📸 Uploading featured image from: ${featuredImageUrl}`);
+        const imageId = await this.uploadFeaturedImage(featuredImageUrl, content.title);
+        postData.featured_media = imageId;
+        logger.info(`✅ Featured image uploaded successfully. Media ID: ${imageId}`);
       } catch (error) {
-        console.warn('Failed to upload featured image:', error);
-        // Continue without featured image
+        logger.error("⚠️ Failed to upload featured image, continuing without it.", error);
+        // Don't block publishing if image fails
       }
     }
 
@@ -406,37 +407,30 @@ export class WordPressService {
    */
   private async uploadFeaturedImage(imageUrl: string, altText: string): Promise<number> {
     try {
-      // Download image
-      const imageResponse = await axios.get(imageUrl, {
+      // 1. Download the image from the URL
+      const response = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
-        timeout: 30000,
       });
+      const imageBuffer = Buffer.from(response.data, 'binary');
 
-      // Extract filename from URL or generate one
-      const urlParts = imageUrl.split('/');
-      const filename = urlParts[urlParts.length - 1] || `featured-image-${Date.now()}.jpg`;
+      // 2. Determine the filename
+      const urlPath = new URL(imageUrl).pathname;
+      const filename = urlPath.substring(urlPath.lastIndexOf('/') + 1) || `${altText.replace(/\s+/g, '-').toLowerCase()}.jpg`;
 
-      // Upload to WordPress
-      const uploadResponse = await this.client.post('/media', imageResponse.data, {
-        headers: {
-          'Content-Type': imageResponse.headers['content-type'] || 'image/jpeg',
-          'Content-Disposition': `attachment; filename="${filename}"`,
-        },
-      });
+      // 3. Upload to WordPress
+      const uploadResult = await this.uploadImageToWordPress(
+        imageBuffer,
+        filename,
+        altText
+      );
 
-      if (uploadResponse.status === 201) {
-        // Update media metadata
-        await this.client.put(`/media/${uploadResponse.data.id}`, {
-          alt_text: altText,
-          caption: altText,
-        });
-
-        return uploadResponse.data.id;
-      }
-
-      throw new Error(`Failed to upload image. Status: ${uploadResponse.status}`);
+      return uploadResult.id;
     } catch (error) {
-      throw new WordPressError('Failed to upload featured image', error);
+      logger.error('Failed to upload featured image', { error });
+      throw new WordPressError(
+        'Could not upload featured image to WordPress',
+        error instanceof Error ? error : undefined
+      );
     }
   }
 
