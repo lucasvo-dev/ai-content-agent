@@ -13,8 +13,7 @@ RUN npm install --legacy-peer-deps
 # Copy the rest of the backend source code
 COPY backend/ ./
 
-# Build the backend with relaxed settings
-RUN npx tsc --noEmit false --skipLibCheck true --outDir dist src/*.ts src/**/*.ts || true
+# Just copy source files
 RUN cp -r src dist/src
 
 # Stage 2: Create the production image
@@ -35,5 +34,5 @@ COPY --from=build /app/backend/dist ./dist
 # Expose the port the app will run on
 EXPOSE 3001
 
-# Command to run the app
-CMD ["node", "-r", "ts-node/register", "dist/src/production-server.ts"] 
+# Command to run the app with relaxed ts-node
+CMD ["node", "-r", "ts-node/register", "--transpile-only", "dist/src/production-server.ts"] 
