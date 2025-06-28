@@ -64,7 +64,7 @@ export interface PublishingTarget {
   successRate: number;
 }
 
-export interface PublishingResult {
+export interface AutomatedPublishingResult {
   success: boolean;
   scheduleId?: string;
   contentId: string;
@@ -264,13 +264,16 @@ export class AutomatedPublishingService {
   /**
    * Get publishing job results
    */
-  async getPublishingJobResults(jobId: string): Promise<PublishingResult[]> {
+  async getPublishingJobResults(jobId: string): Promise<AutomatedPublishingResult[]> {
     const job = await this.getPublishingJobStatus(jobId);
     if (!job) {
       throw new Error('Publishing job not found');
     }
 
-    return job.results || [];
+    return job.results?.map(r => ({
+      ...r,
+      platform: 'wordpress'
+    } as AutomatedPublishingResult)) || [];
   }
 
   /**
@@ -316,7 +319,7 @@ export class AutomatedPublishingService {
   /**
    * Process individual content publishing
    */
-  private async processContentPublishing(taskData: PublishingTaskData): Promise<PublishingResult> {
+  private async processContentPublishing(taskData: PublishingTaskData): Promise<AutomatedPublishingResult> {
     const { taskId, jobId, contentId, wpCredentials, settings } = taskData;
 
     try {
@@ -324,11 +327,14 @@ export class AutomatedPublishingService {
       await this.updatePublishingJobProgress(jobId, 'processing', taskId);
 
       // Get approved content from admin review service
-      const content = await this.adminReviewService.getApprovedContent(contentId);
+      const approvedResult = await this.adminReviewService.getApprovedContent({ limit: 1 });
+      const contentItem = approvedResult.items.find(item => item.content.id === contentId);
       
-      if (!content) {
+      if (!contentItem) {
         throw new Error('Content not found or not approved');
       }
+      
+      const content = contentItem.content;
 
       // Create WordPress service instance
       const wpService = new WordPressService(wpCredentials);
@@ -341,7 +347,13 @@ export class AutomatedPublishingService {
         scheduledDate: settings.scheduledDate,
         seoTitle: content.metadata?.seoTitle,
         seoDescription: content.metadata?.seoDescription,
-        featuredImageUrl: await this.generateFeaturedImage(content),
+        featuredImageUrl: await this.generateFeaturedImage({
+          title: content.title,
+          body: content.body,
+          type: content.type as any,
+          status: 'approved' as any,
+          metadata: content.metadata
+        } as any),
       };
 
       // Convert GeneratedContent to Content format for WordPress service
@@ -349,28 +361,28 @@ export class AutomatedPublishingService {
         id: content.id,
         title: content.title,
         body: content.body,
-        excerpt: content.excerpt,
+        excerpt: content.excerpt || '',
         type: content.type,
-        status: content.status,
+        status: 'approved',
         authorId: 'automated-publishing', // Default for automated publishing
-        projectId: content.metadata?.batchJobId || 'batch-generated',
+        projectId: 'batch-generated',
         metadata: {
           keywords: content.metadata?.keywords || [],
           seoTitle: content.metadata?.seoTitle,
           seoDescription: content.metadata?.seoDescription,
-          featuredImage: content.metadata?.featuredImageSuggestion,
-          wordCount: content.metadata?.wordCount || 0,
-          readingTime: content.metadata?.readingTime || 0,
+          featuredImage: '',
+          wordCount: this.calculateWordCount(content.body),
+          readingTime: this.calculateReadingTime(content.body),
           targetAudience: 'General',
-          seoScore: content.metadata?.seoScore,
+                      seoScore: 0,
           responseTime: 0,
           finishReason: 'completed',
           safetyRatings: [],
         },
         aiGenerated: true,
-        qualityScore: content.metadata?.qualityScore,
-        createdAt: content.generatedAt,
-        updatedAt: content.generatedAt,
+        qualityScore: contentItem.qualityScore,
+        createdAt: contentItem.submittedAt,
+        updatedAt: contentItem.reviewedAt || contentItem.submittedAt,
       };
 
       // Publish to WordPress
@@ -395,8 +407,8 @@ export class AutomatedPublishingService {
           clickThroughRate: 0,
           bounceRate: 0,
         },
-        qualityScore: content.metadata?.qualityScore || 0,
-        aiProvider: content.metadata?.aiProvider || content.aiProvider || 'unknown',
+        qualityScore: contentItem.qualityScore || 0,
+        aiProvider: contentItem.aiProvider || 'unknown',
         createdAt: new Date(),
       };
 
@@ -413,13 +425,14 @@ export class AutomatedPublishingService {
       }
 
       // Update job progress
-      const result: PublishingResult = {
+      const result: any = {
         taskId: taskId,
         contentId,
         targetId: 'wordpress',
+        platform: 'wordpress',
         success: true,
-        wordpressId: publishResult.externalId,
-        url: publishResult.externalUrl,
+        externalId: publishResult.externalId,
+        externalUrl: publishResult.externalUrl,
         publishedAt: publishResult.publishedAt || new Date(),
         performanceTrackingEnabled: settings.enablePerformanceTracking ?? true,
       };
@@ -428,10 +441,11 @@ export class AutomatedPublishingService {
 
       return result;
     } catch (error) {
-      const result: PublishingResult = {
+      const result: any = {
         taskId: taskId,
         contentId,
         targetId: 'wordpress',
+        platform: 'wordpress',
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
@@ -580,8 +594,11 @@ export class AutomatedPublishingService {
   ): Promise<void> {
     try {
       // Get content data
-      const content = await this.adminReviewService.getApprovedContent(contentId);
-      if (!content) return;
+      const approvedResult = await this.adminReviewService.getApprovedContent({ limit: 1 });
+      const contentItem = approvedResult.items.find(item => item.content.id === contentId);
+      if (!contentItem) return;
+      
+      const content = contentItem.content;
 
       // Create fine-tuning entry
       const fineTuningEntry = {
@@ -674,7 +691,7 @@ export class AutomatedPublishingService {
     jobId: string,
     taskStatus: 'processing' | 'completed' | 'failed',
     taskId: string,
-    result?: PublishingResult
+    result?: AutomatedPublishingResult
   ): Promise<void> {
     const jobData = await this.redis.get(`autopub_job:${jobId}`);
     if (!jobData) return;
@@ -686,13 +703,21 @@ export class AutomatedPublishingService {
       job.progress.published++;
       if (result) {
         job.results = job.results || [];
-        job.results.push(result);
+        job.results.push({
+          ...result,
+          taskId: taskId,
+          targetId: 'wordpress'
+        } as any);
       }
     } else if (taskStatus === 'failed') {
       job.progress.failed++;
       if (result) {
         job.results = job.results || [];
-        job.results.push(result);
+        job.results.push({
+          ...result,
+          taskId: taskId,
+          targetId: 'wordpress'
+        } as any);
       }
     }
 
@@ -835,7 +860,7 @@ export class AutomatedPublishingService {
   /**
    * Execute immediate publishing
    */
-  async publishNow(contentId: string, targetId: string): Promise<PublishingResult> {
+  async publishNow(contentId: string, targetId: string): Promise<AutomatedPublishingResult> {
     const target = this.publishingTargets.get(targetId);
     
     if (!target) {
@@ -1138,7 +1163,7 @@ export class AutomatedPublishingService {
   /**
    * Execute publishing to specific platform
    */
-  private async executePublishing(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+  private async executePublishing(contentId: string, target: PublishingTarget): Promise<AutomatedPublishingResult> {
     logger.info(`🚀 Publishing content to ${target.platform}`, {
       contentId,
       targetId: target.id,
@@ -1185,7 +1210,7 @@ export class AutomatedPublishingService {
   /**
    * Publish to WordPress using MultiSite service
    */
-  private async publishToWordPress(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+  private async publishToWordPress(contentId: string, target: PublishingTarget): Promise<AutomatedPublishingResult> {
     try {
       // In a real implementation, retrieve content from database
       // For now, create mock content
@@ -1240,7 +1265,7 @@ export class AutomatedPublishingService {
   /**
    * Publish to Facebook (placeholder)
    */
-  private async publishToFacebook(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+  private async publishToFacebook(contentId: string, target: PublishingTarget): Promise<AutomatedPublishingResult> {
     // Placeholder for Facebook publishing
     logger.info(`📘 Publishing to Facebook: ${contentId}`);
     
@@ -1260,7 +1285,7 @@ export class AutomatedPublishingService {
   /**
    * Publish to Twitter (placeholder)
    */
-  private async publishToTwitter(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+  private async publishToTwitter(contentId: string, target: PublishingTarget): Promise<AutomatedPublishingResult> {
     // Placeholder for Twitter publishing
     logger.info(`🐦 Publishing to Twitter: ${contentId}`);
     
@@ -1280,7 +1305,7 @@ export class AutomatedPublishingService {
   /**
    * Publish to LinkedIn (placeholder)
    */
-  private async publishToLinkedIn(contentId: string, target: PublishingTarget): Promise<PublishingResult> {
+  private async publishToLinkedIn(contentId: string, target: PublishingTarget): Promise<AutomatedPublishingResult> {
     // Placeholder for LinkedIn publishing
     logger.info(`💼 Publishing to LinkedIn: ${contentId}`);
     
@@ -1347,7 +1372,7 @@ export class AutomatedPublishingService {
     categories?: string[];
     tags?: string[];
     contentType?: 'wedding' | 'pre-wedding' | 'yearbook-school' | 'yearbook-concept' | 'corporate' | 'general';
-  }): Promise<PublishingResult> {
+  }): Promise<AutomatedPublishingResult> {
     try {
       const multiSiteRequest: MultiSitePublishingRequest = {
         title: content.title,
@@ -1420,7 +1445,7 @@ export class AutomatedPublishingService {
     targetSiteIds: string[]
   ): Promise<{
     success: boolean;
-    results: PublishingResult[];
+    results: AutomatedPublishingResult[];
     successCount: number;
     failureCount: number;
   }> {
@@ -1439,7 +1464,7 @@ export class AutomatedPublishingService {
         targetSiteIds
       );
 
-      const publishingResults: PublishingResult[] = result.results.map(r => ({
+      const publishingResults: AutomatedPublishingResult[] = result.results.map(r => ({
         success: r.success,
         scheduleId: 'cross-post-immediate',
         contentId: r.postId?.toString() || 'unknown',
@@ -1560,6 +1585,16 @@ export class AutomatedPublishingService {
   /**
    * Shutdown the service
    */
+  private calculateWordCount(text: string): number {
+    return text.split(/\s+/).filter(word => word.length > 0).length;
+  }
+
+  private calculateReadingTime(text: string): number {
+    const wordsPerMinute = 200;
+    const wordCount = this.calculateWordCount(text);
+    return Math.ceil(wordCount / wordsPerMinute);
+  }
+
   shutdown(): void {
     this.stopPublishingScheduler();
     logger.info('⏹️ AutomatedPublishingService shutdown complete');

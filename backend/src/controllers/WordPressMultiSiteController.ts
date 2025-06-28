@@ -97,7 +97,7 @@ export class WordPressMultiSiteController {
   /**
    * Smart publish content with AI routing
    */
-  smartPublish = asyncHandler(async (req: Request, res: Response) => {
+  smartPublish = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { title, content, excerpt, categories, tags, contentType, targetSiteId } = req.body;
     
     if (!title || !content) {
@@ -125,7 +125,7 @@ export class WordPressMultiSiteController {
 
     if (!result.success || result.totalPublished === 0) {
       const errorMessage = result.errors.join(', ') || 'Failed to publish to any site.';
-      return res.status(500).json({
+      res.status(500).json({
         success: false,
         message: errorMessage,
         error: errorMessage

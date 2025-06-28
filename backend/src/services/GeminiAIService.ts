@@ -5,7 +5,9 @@ import {
   GeneratedContent,
   BrandVoice,
   ContentAnalysisResult,
-  ImprovementSuggestion
+  ImprovementSuggestion,
+  ContentType,
+  ContentStatus
 } from '../types/index.js';
 
 export class GeminiAIService {
@@ -43,7 +45,8 @@ export class GeminiAIService {
         title: structuredContent.title,
         body: structuredContent.body,
         excerpt: structuredContent.excerpt,
-        type: request.type,
+        type: request.type as ContentType,
+        status: 'draft' as ContentStatus,
         metadata: {
           wordCount: this.countWords(structuredContent.body),
           seoScore: qualityMetrics.seoScore,
@@ -88,16 +91,16 @@ BRAND VOICE:
 
 SPECIFIC REQUIREMENTS:`;
 
-    if (requirements?.wordCount) {
+    if (typeof requirements === 'object' && requirements?.wordCount) {
       prompt += `\n- Word Count: ${requirements.wordCount} words`;
     }
-    if (requirements?.includeHeadings) {
+    if (typeof requirements === 'object' && requirements?.includeHeadings) {
       prompt += `\n- Include clear headings and subheadings`;
     }
-    if (requirements?.includeCTA) {
+    if (typeof requirements === 'object' && requirements?.includeCTA) {
       prompt += `\n- Include a compelling call-to-action`;
     }
-    if (requirements?.seoOptimized) {
+    if (typeof requirements === 'object' && requirements?.seoOptimized) {
       prompt += `\n- Optimize for SEO with natural keyword integration`;
     }
 
@@ -351,26 +354,27 @@ This content is generated with a ${request.brandVoice.tone} tone and ${request.b
   async analyzeContent(contentId: string): Promise<ContentAnalysisResult> {
     // Mock implementation for content analysis
     return {
-      contentId,
-      qualityScore: 85,
       seoScore: 78,
       readabilityScore: 82,
-      engagementScore: 75,
+      strengths: ['Good structure', 'Clear messaging'],
+      weaknesses: ['Could improve keyword density'],
       suggestions: [
         {
           type: 'seo',
           priority: 'medium',
           description: 'Consider adding more relevant keywords naturally throughout the content',
+          implementation: 'Review keyword density and add relevant terms in headings and body text',
           impact: 'Could improve SEO score by 10-15 points',
         },
         {
           type: 'engagement',
           priority: 'high',
           description: 'Add more questions to increase reader engagement',
+          implementation: 'Add rhetorical questions, polls, or call-to-action elements',
           impact: 'Could improve engagement score by 15-20 points',
         },
       ],
-      analyzedAt: new Date().toISOString(),
+      // analyzedAt: new Date().toISOString(),
     };
   }
 
@@ -519,7 +523,8 @@ Join thousands of ${request.targetAudience} who have already transformed their b
       title,
       body,
       excerpt: `A comprehensive guide about ${request.topic} for ${request.targetAudience}.`,
-      type: request.type,
+      type: request.type as ContentType,
+      status: 'draft' as ContentStatus,
       metadata: {
         wordCount: this.countWords(body),
         seoScore: 85,

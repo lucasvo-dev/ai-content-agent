@@ -234,9 +234,9 @@ export class BatchGenerationService {
         targetAudience: settings.targetAudience,
         keywords: this.extractKeywords(crawledContent),
         requirements: {
-          wordCount: settings.requirements.wordCount,
-          includeHeadings: settings.requirements.includeHeadings,
-          seoOptimized: settings.requirements.seoOptimized,
+          wordCount: settings.requirements.wordCount || 'medium',
+          includeHeadings: settings.requirements.includeHeadings || true,
+          seoOptimized: settings.requirements.seoOptimized || true,
         },
         preferredProvider: settings.aiProvider,
       });

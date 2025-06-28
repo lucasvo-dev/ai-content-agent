@@ -7,6 +7,7 @@ import {
   ContentMetadata,
   BrandVoiceConfig,
   ContentStatus,
+  ContentType,
 } from '../types/index.js';
 
 export type AIProvider = 'openai' | 'gemini' | 'claude' | 'hybrid';
@@ -371,7 +372,7 @@ export class HybridAIService {
       title: title,
       body: body,
       excerpt: this.generateExcerpt(body),
-      type: request.type,
+      type: request.type as ContentType,
       status: 'draft' as ContentStatus,
       metadata: {
         provider: 'openai',
@@ -407,7 +408,7 @@ export class HybridAIService {
       title: title,
       body: body,
       excerpt: this.generateExcerpt(body),
-      type: request.type,
+      type: request.type as ContentType,
       status: 'draft' as ContentStatus,
       metadata: {
         provider: 'gemini',
@@ -448,7 +449,7 @@ export class HybridAIService {
       title: title,
       body: body,
       excerpt: this.generateExcerpt(body),
-      type: request.type,
+      type: request.type as ContentType,
       status: 'draft' as ContentStatus,
       metadata: {
         provider: 'claude',

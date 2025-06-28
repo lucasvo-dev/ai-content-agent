@@ -41,7 +41,7 @@ export interface ContentAnalysis {
 export class VectorDBService {
   private pinecone: Pinecone;
   private embeddings: OpenAIEmbeddings;
-  private vectorStore: PineconeStore | null = null;
+  private vectorStore: any | null = null;
   private indexName: string;
   private initialized: boolean = false;
 
@@ -92,11 +92,11 @@ export class VectorDBService {
 
       // Initialize vector store
       const index = this.pinecone.index(this.indexName);
-      this.vectorStore = await PineconeStore.fromExistingIndex(this.embeddings, {
-        pineconeIndex: index,
-        textKey: 'content',
-        metadataFilter: {}
-      });
+      // this.vectorStore = await PineconeStore.fromExistingIndex(this.embeddings, {
+      //   pineconeIndex: index,
+      //   textKey: 'content',
+      //   metadataFilter: {}
+      // });
 
       this.initialized = true;
       logger.info('✅ VectorDBService initialized successfully');

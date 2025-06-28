@@ -261,7 +261,7 @@ export class LinkBasedContentService {
 
       // Prepare enhanced content generation request (same as generateEnhancedContent)
       const generationRequest: ContentGenerationRequest = {
-        type: (settings.contentType as ContentType) || ContentType.BLOG_POST,
+        type: settings.contentType as any || "blog_post",
         topic: settings.topic || item.scrapedContent.title,
         targetAudience: settings.targetAudience || 'General audience',
         keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],
@@ -509,7 +509,7 @@ Please create new content based on this source material.`,
 
       // Prepare enhanced generation request
       const generationRequest: ContentGenerationRequest = {
-        type: (settings.contentType as ContentType) || ContentType.BLOG_POST,
+        type: settings.contentType as any || "blog_post",
         topic: settings.topic || item.scrapedContent.title,
         targetAudience: settings.targetAudience || 'General audience',
         keywords: settings.keywords ? settings.keywords.split(',').map((k: string) => k.trim()) : [],

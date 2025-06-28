@@ -2,8 +2,6 @@ import { Request } from "express";
 
 // Re-export from content types
 export type { 
-  ContentGenerationRequest,
-  ContentType,
   BrandVoice,
   ContentAnalysisResult,
   ImprovementSuggestion
@@ -87,9 +85,9 @@ export interface Content {
 
 export enum ContentType {
   BLOG_POST = "blog_post",
-  SOCIAL_MEDIA = "social_media",
+  SOCIAL_MEDIA = "social_media", 
   EMAIL = "email",
-  LANDING_PAGE = "ad_copy",
+  AD_COPY = "ad_copy",
 }
 
 export enum ContentStatus {
@@ -152,7 +150,17 @@ export interface ContentGenerationRequest {
   imageSettings?: ImageSettings;
   language?: 'english' | 'vietnamese';
   specialInstructions?: string;
-  requirements?: string;
+  requirements?: {
+    wordCount?: string;
+    includeImages?: boolean;
+    includeHeadings?: boolean;
+    includeCTA?: boolean;
+    seoOptimized?: boolean;
+    uniquenessThreshold?: number;
+  };
+  sourceUrl?: string;
+  projectId?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface ImageSettings {

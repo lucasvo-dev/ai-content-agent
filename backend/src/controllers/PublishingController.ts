@@ -65,7 +65,7 @@ AI-powered marketing automation is no longer a luxury—it's becoming essential 
 
 Ready to explore AI marketing automation for your business? Contact us today to learn how our platform can help you get started.`,
   excerpt: 'Discover how AI-powered marketing automation is transforming businesses with enhanced personalization, predictive analytics, and intelligent content generation.',
-  type: ContentType.BLOG_POST,
+        type: "blog_post" as ContentType,
   status: ContentStatus.DRAFT,
   aiGenerated: true,
   metadata: {

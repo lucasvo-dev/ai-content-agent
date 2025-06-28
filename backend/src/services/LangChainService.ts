@@ -311,18 +311,18 @@ export class LangChainService {
     if (query.competitorUrls && query.competitorUrls.length > 0) {
       for (const url of query.competitorUrls) {
         try {
-          const scraped = await this.webScrapingService.scrapeUrl(url);
-          const insights = await this.extractKeyInsights(scraped.content, query.keywords);
+                    // const scraped = await this.webScrapingService.scrapeUrl(url);
+            // const insights = await this.extractKeyInsights(scraped.content, query.keywords);
           
-          sources.push({
-            url,
-            title: scraped.title,
-            content: scraped.content,
-            relevanceScore: this.calculateRelevanceScore(scraped.content, query.keywords),
-            keyInsights: insights,
-            wordCount: scraped.metadata.wordCount,
-            scrapedAt: scraped.scrapedAt
-          });
+          // sources.push({
+          //   url,
+          //   title: scraped.title,
+          //   content: scraped.content,
+          //   relevanceScore: this.calculateRelevanceScore(scraped.content, query.keywords),
+          //   keyInsights: insights,
+          //   wordCount: scraped.metadata.wordCount,
+          //   scrapedAt: scraped.scrapedAt
+          // });
         } catch (error) {
           logger.warn(`Failed to scrape ${url}:`, error);
         }

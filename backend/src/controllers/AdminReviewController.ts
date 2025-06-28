@@ -32,23 +32,30 @@ export class AdminReviewController {
     } = req.query;
 
     const filters = {
-      status: status as string,
+      status: (status as 'approved' | 'pending' | 'rejected' | 'needs_revision') || 'pending',
       batchJobId: batchJobId as string,
       priority: priority as string,
       limit: parseInt(limit as string, 10),
       offset: parseInt(offset as string, 10)
     };
 
-    const result = await this.reviewService.getReviewQueue(adminId, filters);
+    const result = await this.reviewService.getReviewQueue(filters);
 
     res.json({
       success: true,
       data: {
-        reviewItems: result.reviewItems,
-        summary: result.summary,
-        pagination: result.pagination
+        reviewItems: result.items,
+        summary: {
+          totalPending: result.totalCount,
+          averageQualityScore: result.items.length > 0 ? result.items.reduce((sum, item) => sum + item.qualityScore, 0) / result.items.length : 0
+        },
+        pagination: {
+          total: result.totalCount,
+          limit: filters.limit || 20,
+          offset: filters.offset || 0
+        }
       },
-      message: `Found ${result.reviewItems.length} items in review queue`
+      message: `Found ${result.items.length} items in review queue`
     });
   });
 
@@ -84,7 +91,7 @@ export class AdminReviewController {
       publishSettings
     };
 
-    const result = await this.reviewService.approveContent(contentId, adminId, { approve: true, ...options });
+    const result = await this.reviewService.approveContent(contentId, adminId, options.notes);
 
     res.json({
       success: true,
@@ -114,7 +121,7 @@ export class AdminReviewController {
       throw new AppError('Rejection reason is required', 400);
     }
 
-    const result = await this.reviewService.rejectContent(contentId, adminId, reason, { regenerate });
+    const result = await this.reviewService.rejectContent(contentId, adminId, reason);
 
     res.json({
       success: true,
@@ -205,7 +212,7 @@ export class AdminReviewController {
       throw new AppError('Edit data is required', 400);
     }
 
-    const result = await this.reviewService.editContent(contentId, adminId, edits);
+    const result = await this.reviewService.editContent(contentId, edits, adminId);
 
     res.json({
       success: true,
@@ -228,8 +235,8 @@ export class AdminReviewController {
 
     // Find content in review queue
     const adminId = req.user?.id || 'system';
-    const queueResult = await this.reviewService.getReviewQueue(adminId, {});
-    const reviewItem = queueResult.reviewItems.find(item => item.contentId === contentId);
+    const queueResult = await this.reviewService.getReviewQueue({});
+    const reviewItem = queueResult.items.find(item => item.content.id === contentId);
 
     if (!reviewItem) {
       throw new AppError('Content not found in review queue', 404);
@@ -241,7 +248,7 @@ export class AdminReviewController {
         reviewItem,
         fullContent: reviewItem.content,
         qualityScore: reviewItem.qualityScore,
-        editHistory: reviewItem.content.editHistory || []
+        editHistory: []
       },
       message: 'Content details retrieved successfully'
     });

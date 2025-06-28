@@ -636,7 +636,7 @@ export class LinkContentController {
     try {
       // Convert frontend format to EnhancedContentRequest format
       const request: ContentGenerationRequest = {
-        type: settings.contentType === "wordpress_blog" ? ContentType.BLOG_POST : ContentType.SOCIAL_MEDIA,
+        type: settings.contentType === "wordpress_blog" ? "blog_post" : "social_media",
         topic: sourceContent.title || "Content Topic",
         context: sourceContent.content,
         targetAudience: settings.targetAudience || "General audience",

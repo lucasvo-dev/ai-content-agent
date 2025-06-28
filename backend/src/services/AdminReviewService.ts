@@ -554,15 +554,15 @@ export class AdminReviewService {
     const rejected = items.filter(item => item.status === 'rejected').length;
     const autoApproved = items.filter(item => item.autoApproved).length;
 
-    const qualityScores = items.map(item => typeof item.qualityScore === 'number' ? item.qualityScore : item.qualityScore.overall || 0);
+    const qualityScores = items.map(item => typeof item.qualityScore === 'number' ? item.qualityScore : 0);
     const averageQualityScore = qualityScores.length > 0 
       ? Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length)
       : 0;
 
     const priorityCounts = {
-      high: items.filter(item => item.priority >= 3).length,
-      medium: items.filter(item => item.priority === 2).length,
-      low: items.filter(item => item.priority === 1).length
+      high: items.filter(item => item.qualityScore >= 85).length,
+      medium: items.filter(item => item.qualityScore >= 70 && item.qualityScore < 85).length,
+      low: items.filter(item => item.qualityScore < 70).length
     };
 
     return {
@@ -579,7 +579,7 @@ export class AdminReviewService {
       autoApproved,
       priorityCounts,
       averageReadTime: items.length > 0 
-        ? Math.round(items.reduce((sum, item) => sum + (item.estimatedReadTime || 0), 0) / items.length)
+        ? Math.round(items.reduce((sum, item) => sum + this.calculateReadTime(item.content.body), 0) / items.length)
         : 0
     };
   }

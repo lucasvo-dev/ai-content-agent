@@ -13,8 +13,9 @@ RUN npm install --legacy-peer-deps
 # Copy the rest of the backend source code
 COPY backend/ ./
 
-# Create dist directory and copy source files
+# Create dist directory and copy source files with tsconfig
 RUN mkdir -p dist && cp -r src dist/src
+COPY backend/tsconfig*.json ./
 
 # Stage 2: Create the production image
 FROM node:18-alpine

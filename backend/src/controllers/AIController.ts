@@ -74,7 +74,7 @@ export class AIController {
       console.log('📞 AI Generate endpoint called');
       console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-      const request: ContentGenerationRequestType = req.body;
+      const request: ContentGenerationRequest = req.body;
 
       // Validate required fields
       if (!request.type || !request.topic || !request.targetAudience || !request.keywords) {
@@ -404,7 +404,7 @@ export class AIController {
       }
 
       // Create a new generation request with updated parameters
-      const request: ContentGenerationRequestType = {
+      const request: ContentGenerationRequest = {
         type: regenerationParams.type,
         topic: regenerationParams.topic,
         targetAudience: regenerationParams.targetAudience || 'General audience',

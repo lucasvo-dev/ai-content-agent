@@ -31,7 +31,7 @@ export class EnhancedContentService {
       logger.info("📸 Fetching images from Photo Gallery...");
       const images = await this.photoGalleryService.getImagesForTopic(
             request.topic,
-        request.type === ContentType.BLOG_POST ? "blog" : "social",
+        request.type === "blog_post" ? "blog" : "social",
         this.getImageLimit(request.imageSettings.maxImages),
         {
           ensureConsistency: request.imageSettings.ensureConsistency,
@@ -46,7 +46,7 @@ export class EnhancedContentService {
       
       logger.info(`✅ Found ${images.length} images. Enhancing content...`);
 
-      if (request.type === ContentType.BLOG_POST) {
+      if (request.type === "blog_post") {
         baseContent.body = this.insertImagesIntoContent(baseContent.body, images, request);
         
         baseContent.metadata.featuredImage = images[0].full_image_url;
@@ -59,7 +59,7 @@ export class EnhancedContentService {
           };
         });
 
-      } else if (request.type === ContentType.SOCIAL_MEDIA) {
+      } else if (request.type === "social_media") {
         baseContent.metadata.featuredImage = images[0].full_image_url;
       }
 
