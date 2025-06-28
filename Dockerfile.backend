@@ -34,5 +34,5 @@ COPY --from=build /app/backend/dist ./dist
 # Expose the port the app will run on
 EXPOSE 3001
 
-# Command to run the app with ts-node transpile-only
-CMD ["npx", "ts-node", "--transpile-only", "dist/src/production-server.ts"] 
+# Command to run the app with tsx (faster TypeScript runner)
+CMD ["npx", "tsx", "dist/src/production-server.ts"] 
