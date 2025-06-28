@@ -36,4 +36,4 @@ COPY --from=build /app/backend/dist ./dist
 EXPOSE 3001
 
 # Command to run the app
-CMD ["node", "-r", "ts-node/register", "src/production-server.ts"] 
+CMD ["node", "-r", "ts-node/register", "dist/src/production-server.ts"] 
