@@ -289,49 +289,49 @@ export class WordPressMultiSiteService {
     const errors: string[] = [];
     let mainResult: MultiSitePublishingResult['mainResult'];
 
-    try {
-      // Prepare WordPress post data
-      const postData = {
-        title: request.title,
-        body: request.body,
-        excerpt: request.excerpt || '',
-        categories: request.categories || [],
-        tags: request.tags || [],
-        status: request.status || 'publish' as const,
-        featuredImageUrl: request.featuredImageUrl,
-        seoTitle: request.seoTitle,
-        seoDescription: request.seoDescription
-      };
+    // Prepare WordPress post data
+    const postData = {
+      title: request.title,
+      body: request.body,
+      excerpt: request.excerpt || '',
+      categories: request.categories || [],
+      tags: request.tags || [],
+      status: request.status || 'publish' as const,
+      featuredImageUrl: request.featuredImageUrl,
+      seoTitle: request.seoTitle,
+      seoDescription: request.seoDescription
+    };
 
-      // Prepare content object for WordPress
-      const contentObject = {
-        id: 'temp-id',
-        title: postData.title,
-        body: postData.body,
-        excerpt: postData.excerpt,
-        type: 'BLOG_POST' as any,
-        status: 'APPROVED' as any,
-        authorId: 'system',
-        projectId: 'multi-site',
-        metadata: {
-          keywords: postData.tags,
-          seoTitle: postData.seoTitle,
-          seoDescription: postData.seoDescription
-        },
-        aiGenerated: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
-      const publishSettings = {
-        status: postData.status,
-        categories: postData.categories,
-        tags: postData.tags,
-        featuredImageUrl: postData.featuredImageUrl,
+    // Prepare content object for WordPress
+    const contentObject = {
+      id: 'temp-id',
+      title: postData.title,
+      body: postData.body,
+      excerpt: postData.excerpt,
+      type: 'BLOG_POST' as any,
+      status: 'APPROVED' as any,
+      authorId: 'system',
+      projectId: 'multi-site',
+      metadata: {
+        keywords: postData.tags,
         seoTitle: postData.seoTitle,
         seoDescription: postData.seoDescription
-      };
+      },
+      aiGenerated: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
 
+    const publishSettings = {
+      status: (postData.status === 'pending' ? 'draft' : postData.status) as 'draft' | 'publish' | 'private',
+      categories: postData.categories,
+      tags: postData.tags,
+      featuredImageUrl: postData.featuredImageUrl,
+      seoTitle: postData.seoTitle,
+      seoDescription: postData.seoDescription
+    };
+
+    try {
       // Publish to target site
       const result = await targetService.publishContent(contentObject, publishSettings);
 
@@ -501,7 +501,7 @@ export class WordPressMultiSiteService {
         };
 
         const publishSettings = {
-          status: postData.status,
+          status: (postData.status === 'pending' ? 'draft' : postData.status) as 'draft' | 'publish' | 'private',
           categories: postData.categories,
           tags: postData.tags,
           featuredImageUrl: postData.featuredImageUrl,
@@ -633,7 +633,7 @@ export class WordPressMultiSiteService {
           siteName: site.name,
           url: site.url,
           responseTime,
-          error: testResult.success ? undefined : testResult.error
+          error: testResult.success ? undefined : testResult.message
         };
 
         logger.info(`${testResult.success ? '✅' : '❌'} Connection test ${site.name}`, {

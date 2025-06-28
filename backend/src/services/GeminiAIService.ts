@@ -1,11 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { 
-  ContentGenerationRequest, 
-  GeneratedContent, 
+import { logger } from '../utils/logger.js';
+import {
+  ContentGenerationRequestType as ContentGenerationRequest,
+  GeneratedContent,
   BrandVoice,
   ContentAnalysisResult,
-  ImprovementSuggestion 
-} from '../types/content.js';
+  ImprovementSuggestion
+} from '../types/index.js';
 
 export class GeminiAIService {
   private genAI: GoogleGenerativeAI;

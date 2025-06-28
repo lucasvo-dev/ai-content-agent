@@ -1,5 +1,13 @@
 import { Request } from "express";
 
+// Re-export from content types
+export type { 
+  ContentGenerationRequest as ContentGenerationRequestType,
+  BrandVoice,
+  ContentAnalysisResult,
+  ImprovementSuggestion
+} from './content.js';
+
 // User types
 export interface User {
   id: string;

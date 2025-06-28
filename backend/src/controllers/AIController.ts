@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { HybridAIService } from '../services/HybridAIService.js';
-import type { ContentGenerationRequest } from '../types/content.js';
+import type { ContentGenerationRequestType } from '../types/index.js';
 
 export class AIController {
   private aiService: HybridAIService;
@@ -74,7 +74,7 @@ export class AIController {
       console.log('📞 AI Generate endpoint called');
       console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-      const request: ContentGenerationRequest = req.body;
+      const request: ContentGenerationRequestType = req.body;
 
       // Validate required fields
       if (!request.type || !request.topic || !request.targetAudience || !request.keywords) {
@@ -404,7 +404,7 @@ export class AIController {
       }
 
       // Create a new generation request with updated parameters
-      const request: ContentGenerationRequest = {
+      const request: ContentGenerationRequestType = {
         type: regenerationParams.type,
         topic: regenerationParams.topic,
         targetAudience: regenerationParams.targetAudience || 'General audience',
