@@ -649,7 +649,6 @@ export class LinkContentController {
           brandName: settings.brandName || "Your Brand",
         },
         preferredProvider: settings.preferredProvider || "auto",
-        wordCount: settings.wordCount,
         imageSettings: settings.includeImages ? {
           includeImages: true,
           imageSelection: settings.imageSelection,

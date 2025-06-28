@@ -362,14 +362,15 @@ export class HybridAIService {
     });
     
     const textContent = response.choices[0].message.content || '';
-    const wordCount = this.countWords(textContent);
+    const { title, body } = this._parseAiResponse(textContent);
+    const wordCount = this.countWords(body);
     
     // The new prompt returns raw HTML/text, not JSON, so we just use the content directly.
     return {
       id: `openai-${Date.now()}`,
-      title: request.topic, // We can improve title generation later
-      body: textContent,
-      excerpt: this.generateExcerpt(textContent),
+      title: title,
+      body: body,
+      excerpt: this.generateExcerpt(body),
       type: request.type,
       status: 'draft' as ContentStatus,
       metadata: {
@@ -378,9 +379,9 @@ export class HybridAIService {
         cost: this.calculateOpenAICost(response.usage?.total_tokens || 0),
         generatedAt: new Date().toISOString(),
         wordCount: wordCount,
-        seoScore: this.calculateSEOScore(textContent, request.keywords),
-        readabilityScore: this.calculateReadabilityScore(textContent),
-        engagementScore: this.calculateEngagementScore(textContent),
+        seoScore: this.calculateSEOScore(body, request.keywords),
+        readabilityScore: this.calculateReadabilityScore(body),
+        engagementScore: this.calculateEngagementScore(body),
         promptVersion: '2.0',
         tokensUsed: response.usage?.total_tokens || 0,
         safetyRatings: [],
@@ -398,13 +399,14 @@ export class HybridAIService {
     const result = await this.gemini.generateContent(prompt);
     const response = await result.response;
     const textContent = response.text();
-    const wordCount = this.countWords(textContent);
+    const { title, body } = this._parseAiResponse(textContent);
+    const wordCount = this.countWords(body);
 
     return {
       id: `gemini-${Date.now()}`,
-      title: request.topic, // We can improve title generation later
-      body: textContent,
-      excerpt: this.generateExcerpt(textContent),
+      title: title,
+      body: body,
+      excerpt: this.generateExcerpt(body),
       type: request.type,
       status: 'draft' as ContentStatus,
       metadata: {
@@ -413,9 +415,9 @@ export class HybridAIService {
         cost: 0, // Gemini Flash is currently free
         generatedAt: new Date().toISOString(),
         wordCount: wordCount,
-        seoScore: this.calculateSEOScore(textContent, request.keywords),
-        readabilityScore: this.calculateReadabilityScore(textContent),
-        engagementScore: this.calculateEngagementScore(textContent),
+        seoScore: this.calculateSEOScore(body, request.keywords),
+        readabilityScore: this.calculateReadabilityScore(body),
+        engagementScore: this.calculateEngagementScore(body),
         promptVersion: '2.0',
         tokensUsed: 0, // Placeholder
         safetyRatings: response.candidates?.[0]?.safetyRatings || [],
@@ -438,13 +440,14 @@ export class HybridAIService {
     });
 
     const textContent = response.content[0].text || '';
-    const wordCount = this.countWords(textContent);
+    const { title, body } = this._parseAiResponse(textContent);
+    const wordCount = this.countWords(body);
 
     return {
       id: `claude-${Date.now()}`,
-      title: request.topic, // We can improve title generation later
-      body: textContent,
-      excerpt: this.generateExcerpt(textContent),
+      title: title,
+      body: body,
+      excerpt: this.generateExcerpt(body),
       type: request.type,
       status: 'draft' as ContentStatus,
       metadata: {
@@ -453,9 +456,9 @@ export class HybridAIService {
         cost: this.calculateClaudeCost(response.usage?.input_tokens || 0, response.usage?.output_tokens || 0),
         generatedAt: new Date().toISOString(),
         wordCount: wordCount,
-        seoScore: this.calculateSEOScore(textContent, request.keywords),
-        readabilityScore: this.calculateReadabilityScore(textContent),
-        engagementScore: this.calculateEngagementScore(textContent),
+        seoScore: this.calculateSEOScore(body, request.keywords),
+        readabilityScore: this.calculateReadabilityScore(body),
+        engagementScore: this.calculateEngagementScore(body),
         promptVersion: '2.0',
         tokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
         safetyRatings: [],
@@ -479,44 +482,48 @@ export class HybridAIService {
     const tone = brandVoice?.tone || 'professional';
 
     if (type === 'blog_post') {
-      return `You are an expert content writer and SEO specialist. Your task is to write a new, unique, and high-quality article based on the provided source material.
+      return `You are an expert content writer and SEO specialist. Your task is to write a new, unique, and high-quality article based on the provided source material, suitable for a professional WordPress blog.
 
 ### CRITICAL RULES (Follow Strictly):
-1.  **ORIGINAL CONTENT**: Do NOT copy the source article. Use it only as a reference for key information, facts, and ideas. You must write a completely new and original piece of content.
-2.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for a WordPress editor. Use <h2> for the main title, <h3> for subheadings, <p> for paragraphs, <strong> for bolding key phrases, and <ul>/<li> for lists. Do NOT include <html>, <head>, or <body> tags.
-3.  **LOGICAL STRUCTURE**: Create a new, logical, and engaging structure for the article. Do not mirror the structure of the source article.
-4.  **STRICT WORD COUNT**: The final article's total word count MUST be **exactly ${request.wordCount || 1000} words**. It is critical that you adhere to this word count. Do not write significantly more or less.
-5.  **IMAGE PLACEMENT (CRITICAL)**: Strategically place the placeholder \`[INSERT_IMAGE]\` 3 to 5 times where an image would be most effective. Place it on a new line AFTER a paragraph.
-6.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
-7.  **BRAND INTEGRATION**: If you find competitor brands mentioned, replace them with "${brandName}". Mention "${brandName}" naturally 1-2 times if relevant.
-8.  **AUDIENCE & TONE**: Write for a "${targetAudience}" audience using a ${tone} tone.
-9.  **KEYWORD INTEGRATION**: Weave these keywords naturally into the article: "${keywords?.join(', ')}".
-10. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
+1.  **GENERATE THE TITLE**: Your first and most important task is to generate a compelling, SEO-friendly <h2> title for the article. This must be the very first line of your response.
+2.  **ARTICLE LENGTH**: After the title, write a comprehensive, in-depth, and well-structured article. The length should be appropriate for a detailed blog post, typically between 800 and 1500 words. Do not write a short summary.
+3.  **ORIGINAL CONTENT**: Do NOT copy the source article. Use it only as a reference for key information, facts, and ideas. You must write a completely new and original piece of content.
+4.  **OUTPUT FORMAT**: The ENTIRE output must be valid HTML ready for a WordPress editor. Use <h3> for subheadings, <p> for paragraphs, <strong> for bolding key phrases, and <ul>/<li> for lists. Do NOT include <html>, <head>, or <body> tags.
+5.  **LOGICAL STRUCTURE**: Create a new, logical, and engaging structure for the article. Do not mirror the structure of the source article.
+6.  **IMAGE PLACEMENT (CRITICAL)**: Strategically place the placeholder \`[INSERT_IMAGE]\` 3 to 5 times where an image would be most effective. Place it on a new line AFTER a paragraph.
+7.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
+8.  **BRAND INTEGRATION**: If you find competitor brands mentioned, replace them with "${brandName}". Mention "${brandName}" naturally 1-2 times if relevant.
+9.  **AUDIENCE & TONE**: Write for a "${targetAudience}" audience using a ${tone} tone.
+10. **KEYWORD INTEGRATION**: Weave these keywords naturally into the article: "${keywords?.join(', ')}".
+11. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
 
 ### SOURCE MATERIAL FOR REFERENCE:
 ---
-**Original Topic:** ${topic}
+**Original Topic Suggestion:** ${topic}
 **Source Content Snippet:**
 ${context}
 ---
 
-### OUTPUT REQUIREMENTS:
-Provide ONLY the final HTML content. Do not add any meta-commentary or explanations. Your output should begin directly with the <h2> title tag.`;
+### FINAL REMINDER:
+- Your output must begin directly with the <h2> title tag. Do not add any meta-commentary.
+
+Provide ONLY the final HTML content.`;
     }
 
     if (type === 'social_media') {
       return `You are an expert social media manager. Your task is to transform the 'SOURCE ARTICLE' into a highly engaging Facebook post.
 
 ### CRITICAL RULES (Follow Strictly):
-1.  **HOOK**: Start with a compelling question or a bold statement.
-2.  **READABILITY**: Use short paragraphs and relevant emojis (2-4).
-3.  **VALUE & CTA**: Summarize the key point and end with a Call-To-Action.
-4.  **HASHTAGS**: Include 3-5 relevant hashtags.
-5.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
-6.  **TONE**: Write for "${targetAudience}" with a ${tone} tone.
-7.  **BRAND REPLACEMENT**: Replace competitor brands with "${brandName}".
-8.  **KEYWORD INTEGRATION**: Naturally integrate these keywords: "${keywords?.join(', ')}".
-9. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
+1.  **POST LENGTH**: Keep the post concise, scannable, and engaging, suitable for a Facebook feed. Aim for a length of 100-250 words.
+2.  **HOOK**: Start with a compelling question or a bold statement.
+3.  **READABILITY**: Use short paragraphs and relevant emojis (2-4).
+4.  **VALUE & CTA**: Summarize the key point and end with a Call-To-Action.
+5.  **HASHTAGS**: Include 3-5 relevant hashtags.
+6.  **LANGUAGE**: Write exclusively in ${language === 'vietnamese' ? 'VIETNAMESE' : 'ENGLISH'}.
+7.  **TONE**: Write for "${targetAudience}" with a ${tone} tone.
+8.  **BRAND REPLACEMENT**: Replace competitor brands with "${brandName}".
+9.  **KEYWORD INTEGRATION**: Naturally integrate these keywords: "${keywords?.join(', ')}".
+10. **SPECIAL INSTRUCTIONS**: ${specialInstructions || 'None.'}
 
 ### SOURCE ARTICLE TO TRANSFORM:
 ---
@@ -531,6 +538,20 @@ Provide ONLY the final text for the Facebook post. Do not add any meta-commentar
     
     // Fallback for unknown types
     return `Rewrite the following content: ${context}`;
+  }
+
+  private _parseAiResponse(html: string): { title: string; body: string } {
+    const titleMatch = html.match(/<h2[^>]*>(.*?)<\/h2>/i);
+    let title = 'Untitled';
+    let body = html;
+
+    if (titleMatch && titleMatch[1]) {
+      title = titleMatch[1].trim();
+      // Remove the matched h2 tag from the body to avoid duplication
+      body = html.replace(/<h2[^>]*>.*?<\/h2>\s*/i, '');
+    }
+
+    return { title, body };
   }
 
   private parseTextContent(text: string, type: string): any {

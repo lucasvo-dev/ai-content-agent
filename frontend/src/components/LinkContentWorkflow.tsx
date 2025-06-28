@@ -1346,19 +1346,13 @@ function SettingsStep({
               />
             </div>
 
-            <div>
-              <Label htmlFor="brandName" className="text-sm font-medium text-gray-700">
-                Brand Name
-              </Label>
+            <div className="space-y-2">
+              <Label htmlFor="brandName">Brand Name (Optional)</Label>
               <Input
                 id="brandName"
-                value={llmSettings.brandName}
-                onChange={(e) => {
-                  console.log('🏢 Brand Name changing to:', e.target.value);
-                  updateSetting('brandName', e.target.value);
-                }}
-                placeholder="e.g., Your Company Name"
-                className="mt-1"
+                value={llmSettings.brandName || ""}
+                onChange={(e) => updateSetting('brandName', e.target.value)}
+                placeholder="e.g., Your Awesome Company"
               />
             </div>
 
@@ -1380,11 +1374,8 @@ function SettingsStep({
               <p className="text-xs text-gray-500 mt-1">Separate multiple keywords with commas</p>
             </div>
 
-            <div>
-              <Label htmlFor="specialRequest" className="text-sm font-medium text-gray-700">
-                Special Instructions
-                <span className="text-gray-500 text-xs ml-1">(optional)</span>
-              </Label>
+            <div className="space-y-2">
+              <Label htmlFor="specialRequest">Special Instructions (Optional)</Label>
               <Input
                 id="specialRequest"
                 value={llmSettings.specialRequest}

@@ -140,4 +140,19 @@ export interface ScrapingResult {
   error?: string;
   strategy: string;
   processingTime: number;
+}
+
+export interface ContentSettings {
+  contentType: "wordpress_blog" | "facebook_post";
+  language: "english" | "vietnamese";
+  tone: "professional" | "casual" | "friendly" | "authoritative";
+  targetAudience: string;
+  brandName?: string;
+  keywords?: string;
+  preferredProvider?: "auto" | "openai" | "gemini" | "claude";
+  specialRequest?: string;
+}
+
+export interface ImageSettings {
+  // ... existing code ...
 } 

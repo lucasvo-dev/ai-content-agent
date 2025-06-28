@@ -139,19 +139,20 @@ export interface ContentGenerationRequest {
   targetAudience: string;
   keywords: string[];
   brandVoice: BrandVoiceConfig;
-  preferredProvider?: "auto" | "openai" | "gemini" | "claude";
-  language?: "vietnamese" | "english";
+  preferredProvider?: 'auto' | 'openai' | 'gemini' | 'claude';
+  imageSettings?: ImageSettings;
+  language?: 'english' | 'vietnamese';
   specialInstructions?: string;
-  wordCount?: number;
-  imageSettings?: {
-    includeImages: boolean;
-    imageSelection?: "category" | "folder" | "manual";
-    imageCategory?: string;
-    specificFolder?: string;
-    maxImages?: number | "auto";
-    ensureConsistency?: boolean;
-    selectedImages?: string[];
-  };
+}
+
+export interface ImageSettings {
+  includeImages: boolean;
+  imageSelection?: "category" | "folder" | "manual";
+  imageCategory?: string;
+  specificFolder?: string;
+  maxImages?: number | "auto";
+  ensureConsistency?: boolean;
+  selectedImages?: string[];
 }
 
 export interface ContentGenerationResponse {

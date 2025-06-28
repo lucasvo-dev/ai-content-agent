@@ -148,15 +148,18 @@ export class WebScrapingService {
       
       // Navigate to URL with optimized settings
       await page.goto(url, {
-        waitUntil: 'domcontentloaded', // More reliable than networkidle
+        waitUntil: 'networkidle', // Wait for network to be idle, better for SPA
         timeout: options.timeout || 60000
       });
 
-      // Wait for content to load
-      if (options.waitFor) {
-        await page.waitForSelector(options.waitFor, { timeout: 5000 }).catch(() => {
-          logger.warn(`Wait selector ${options.waitFor} not found, continuing...`);
-        });
+      // Additional wait for client-side rendering
+      await page.waitForTimeout(3000);
+
+      // Check for anti-bot pages
+      const pageTitle = await page.title();
+      if (pageTitle.toLowerCase().includes('one moment') || pageTitle.toLowerCase().includes('checking your browser')) {
+        logger.warn(`Anti-bot page detected for ${url}. Waiting longer...`);
+        await page.waitForTimeout(7000); // Wait longer for challenge to resolve
       }
 
       // Extract content using Readability.js inside the browser context
