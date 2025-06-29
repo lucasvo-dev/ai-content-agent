@@ -13,9 +13,8 @@ RUN npm install --legacy-peer-deps
 # Copy the rest of the backend source code
 COPY backend/ ./
 
-# Create dist directory and copy source files with tsconfig
-RUN mkdir -p dist && cp -r src dist/src
-COPY backend/tsconfig*.json ./
+# Build the TypeScript code to JavaScript
+RUN npm run build
 
 # Stage 2: Create the production image
 FROM node:18-alpine
@@ -29,11 +28,11 @@ COPY --from=build /app/backend/package-lock.json ./package-lock.json
 # Install only production dependencies
 RUN npm ci --omit=dev --legacy-peer-deps
 
-# Copy the build output from the build stage
+# Copy the compiled JavaScript from the build stage
 COPY --from=build /app/backend/dist ./dist
 
 # Expose the port the app will run on
 EXPOSE 3001
 
-# Command to run the app with tsx (faster TypeScript runner)
-CMD ["npx", "tsx", "dist/src/production-server.ts"] 
+# Command to run the compiled JavaScript app
+CMD ["node", "dist/production-server.js"] 

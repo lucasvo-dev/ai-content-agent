@@ -424,7 +424,7 @@ export class WordPressService {
           
           // Look for a landscape image first
           const landscapeImage = content.metadata.galleryImages.find(img => 
-            img.is_featured || this.isLikelyLandscape(img.url)
+            this.isLikelyLandscape(img.url)
           );
           
           const selectedImage = landscapeImage || content.metadata.galleryImages[0];
