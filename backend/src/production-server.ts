@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 import healthRoutes from "./routes/health";
 import aiRoutes from "./routes/ai";
 import linkContentRoutes from "./routes/link-content";
+import wordPressMultiSiteRoutes from "./routes/wordpress-multisite";
 
 console.log('🔧 Loading environment variables...');
 dotenv.config();
@@ -77,6 +78,9 @@ app.use("/api/v1/ai", aiRoutes);
 // Link-based content routes
 app.use("/api/v1/link-content", linkContentRoutes);
 
+// WordPress Multi-Site routes
+app.use("/api/v1/wordpress-multisite", wordPressMultiSiteRoutes);
+
 // Basic test endpoint
 app.get('/api/v1/test', (req, res) => {
   console.log('📞 Test endpoint called');
@@ -96,7 +100,11 @@ app.get('/api/v1/test', (req, res) => {
       'GET /api/v1/ai/stats',
       'POST /api/v1/ai/regenerate/:contentId',
       'GET /api/v1/link-content/health',
-      'POST /api/v1/link-content/test-scrape'
+      'POST /api/v1/link-content/test-scrape',
+      'POST /api/v1/link-content/generate-enhanced',
+      'GET /api/v1/wordpress-multisite/sites',
+      'POST /api/v1/wordpress-multisite/smart-publish',
+      'GET /api/v1/wordpress-multisite/health'
     ]
   });
 });
@@ -111,7 +119,8 @@ app.use("*", (req, res) => {
       '/api/v1/health',
       '/api/v1/test',
       '/api/v1/ai/*',
-      '/api/v1/link-content/*'
+      '/api/v1/link-content/*',
+      '/api/v1/wordpress-multisite/*'
     ]
   });
 });
