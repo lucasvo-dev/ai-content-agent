@@ -620,47 +620,21 @@ export class LinkContentController {
    * POST /api/v1/link-content/generate-enhanced
    */
   generateEnhancedContent = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const { sourceContent, settings } = req.body;
+    const { request } = req.body;
     
-    if (!sourceContent || !settings) {
+    if (!request) {
       res.status(400).json({
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Source content and settings are required",
+          message: "Request object is required",
         },
       });
       return;
     }
 
     try {
-      // Convert frontend format to EnhancedContentRequest format
-      const request: ContentGenerationRequest = {
-        type: settings.contentType === "wordpress_blog" ? "blog_post" : "social_media",
-        topic: sourceContent.title || "Content Topic",
-        context: sourceContent.content,
-        targetAudience: settings.targetAudience || "General audience",
-        keywords: settings.keywords ? settings.keywords.split(",").map((k: string) => k.trim()) : [],
-        brandVoice: {
-          tone: settings.tone || "professional",
-          style: "conversational",
-          vocabulary: "advanced",
-          length: "comprehensive",
-          brandName: settings.brandName || "Your Brand",
-        },
-        preferredProvider: settings.preferredProvider || "auto",
-        imageSettings: settings.includeImages ? {
-          includeImages: true,
-          imageSelection: settings.imageSelection,
-          imageCategory: settings.imageCategory,
-          specificFolder: settings.specificFolder,
-          maxImages: settings.maxImages || 3,
-          ensureConsistency: settings.ensureConsistency || false,
-        } : { includeImages: false },
-        language: settings.language || "vietnamese",
-        specialInstructions: settings.specialRequest || "",
-      };
-
+      // The request object is already in the correct format for EnhancedContentService
       logger.info("🎨 Starting enhanced content generation with images", {
         topic: request.topic,
         includeImages: request.imageSettings?.includeImages,
