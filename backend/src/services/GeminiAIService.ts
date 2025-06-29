@@ -1,8 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { logger } from '../utils/logger.js';
 import {
-  ContentGenerationRequest,
-  GeneratedContent,
+  ContentGenerationRequest, 
+  GeneratedContent, 
   BrandVoice,
   ContentAnalysisResult,
   ImprovementSuggestion,

@@ -430,7 +430,7 @@ export class LinkContentController {
 
     try {
       logger.info(`Testing scrape for URL: ${url}`);
-
+      
       const results = await this.webScrapingService.scrapeUrls([url]);
       const result = results[0];
 
@@ -478,7 +478,7 @@ export class LinkContentController {
   healthCheck = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
       const isHealthy = await this.linkContentService.healthCheck();
-
+      
       res.json({
         success: true,
         data: {
@@ -516,7 +516,7 @@ export class LinkContentController {
         color_code: c.color_code || "#6B7280",
         folder_count: c.folder_count || 0,
       }));
-
+      
       res.json({
         success: true,
         data: { categories },
@@ -540,7 +540,7 @@ export class LinkContentController {
    */
   getImageFolders = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { categorySlug } = req.params;
-
+    
     if (!categorySlug) {
       res.status(400).json({
         success: false,
@@ -554,7 +554,7 @@ export class LinkContentController {
 
     try {
       const folders = await this.photoGalleryService.getFoldersByCategory(categorySlug);
-
+      
       res.json({
         success: true,
         data: { folders },
@@ -578,7 +578,7 @@ export class LinkContentController {
    */
   previewImages = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { categorySlug, folderName, limit = "5" } = req.query as { [key: string]: string };
-
+    
     try {
       // Fetch images by category (if provided) - use retry with mock fallback
       const result = await this.photoGalleryService.getFeaturedImagesWithRetry({
@@ -595,9 +595,9 @@ export class LinkContentController {
       if (folderName) {
         images = images.filter(img => img.folder_path?.toLowerCase().includes(folderName.toLowerCase()));
       }
-
+      
       logger.info(`📸 Preview images: ${images.length} images returned for category="${categorySlug}"`);
-
+      
       res.json({
         success: true,
         data: { images },
@@ -621,7 +621,7 @@ export class LinkContentController {
    */
   generateEnhancedContent = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { sourceContent, settings } = req.body;
-
+    
     if (!sourceContent || !settings) {
       res.status(400).json({
         success: false,
@@ -667,16 +667,16 @@ export class LinkContentController {
         imageSelection: request.imageSettings?.imageSelection,
         imageCategory: request.imageSettings?.imageCategory,
       });
-
+      
       const enhancedContent = await this.enhancedContentService.generateContentWithImages(request);
-
+      
       // Log the result to check if images were added
       logger.info("✅ Enhanced content generated", {
         hasMetadata: !!enhancedContent.metadata,
         hasFeaturedImage: !!enhancedContent.metadata?.featuredImage,
         galleryImagesCount: enhancedContent.metadata?.galleryImages?.length || 0,
       });
-
+      
       res.json({
         success: true,
         data: enhancedContent,
@@ -703,4 +703,4 @@ export class LinkContentController {
     await this.linkContentService.cleanup();
     await this.webScrapingService.close();
   }
-}
+} 

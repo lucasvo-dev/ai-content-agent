@@ -55,6 +55,15 @@ export interface GeneratedContent {
     requestedProvider?: string;
     selectionReason?: string;
     originalError?: string;
+    featuredImage?: string;
+    featuredImageAlt?: string;
+    featuredImageCaption?: string;
+    galleryImages?: Array<{
+      url: string;
+      alt_text: string;
+      caption?: string;
+      is_featured?: boolean;
+    }>;
   };
 }
 

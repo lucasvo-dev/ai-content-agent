@@ -144,13 +144,13 @@ export class PhotoGalleryService {
       // If no images found and no source specified, try all available sources
       if (response.data.images?.length === 0 && !options.source && response.data.available_sources?.length > 0) {
         logger.info("🔄 No images found, trying all available sources...");
-
+        
         for (const source of response.data.available_sources) {
           logger.info(`🔍 Trying source: ${source.key} (${source.name})`);
-
+          
           const sourceParams = { ...params, source: source.key };
           const sourceResponse = await this.axios.get("", { params: sourceParams });
-
+          
           if (sourceResponse.data.success && sourceResponse.data.images?.length > 0) {
             logger.info(`✅ Found ${sourceResponse.data.images.length} images in source: ${source.key}`);
             response.data = sourceResponse.data;
@@ -207,10 +207,10 @@ export class PhotoGalleryService {
   }> {
     const maxRetries = options.maxRetries || 2;
     const requestedLimit = options.limit || 10;
-
+    
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const result = await this.getFeaturedImages(options);
-
+      
       // If we got enough images or this is the last attempt, return
       if (result.images.length >= requestedLimit || attempt === maxRetries) {
         // Only return real images - no mock fallback
@@ -219,13 +219,13 @@ export class PhotoGalleryService {
         }
         return result;
       }
-
+      
       // Wait before retry (5-10 seconds as recommended)
       const waitTime = Math.min(5000 + (attempt * 2000), 10000);
       logger.info(`🔄 Retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
-
+    
     // This shouldn't be reached, but TypeScript needs it
     return { images: [], total_found: 0, available_categories: [] };
   }
@@ -237,11 +237,11 @@ export class PhotoGalleryService {
     const mockImages: PhotoGalleryImage[] = [];
     const mockFolders = this.generateMockFolders(category);
     const selectedFolder = mockFolders[0] || `${category} Collection`;
-
+    
     for (let i = 0; i < limit; i++) {
       const seed = `${category}-${i}`;
       const imageUrl = `https://picsum.photos/750/500?random=${seed}`;
-
+      
       mockImages.push({
         id: i + 1,
         source_key: "mock",
@@ -259,7 +259,7 @@ export class PhotoGalleryService {
         },
       });
     }
-
+    
     return mockImages;
   }
 
@@ -280,7 +280,7 @@ export class PhotoGalleryService {
       let categorySlug = options.imageCategory || "";
       
       if (!categorySlug) {
-        const topicLower = topic.toLowerCase();
+      const topicLower = topic.toLowerCase();
         if (topicLower.includes("cưới") || topicLower.includes("wedding") || topicLower.includes("đám cưới")) {
           categorySlug = "wedding";
         } else if (topicLower.includes("pre-wedding") || topicLower.includes("prewedding")) {
@@ -305,7 +305,7 @@ export class PhotoGalleryService {
       });
 
       logger.info(`Found ${result.images.length} images for topic "${topic}" (category: ${categorySlug || "all"})`);
-
+      
       // If no images for default query, try each available source
       if (result.images.length === 0) {
         logger.warn("No images found for default query, iterating over available sources...");
@@ -330,8 +330,8 @@ export class PhotoGalleryService {
 
         if (result.images.length === 0) {
           logger.warn("⚠️ No real images found from any source, returning empty array");
-          return [];
-        }
+        return [];
+      }
       }
 
       // Apply randomization and consistency logic
@@ -395,15 +395,15 @@ export class PhotoGalleryService {
   generateMockImagesForTopic(topic: string, limit: number = 5): PhotoGalleryImage[] {
     const mockImages: PhotoGalleryImage[] = [];
     const baseUrl = "https://picsum.photos";
-
+    
     // Use topic hash to generate consistent images
     const topicHash = topic.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-
+    
     for (let i = 0; i < limit; i++) {
       const seed = topicHash + i;
       const width = 1200;
       const height = 800;
-
+      
       mockImages.push({
         id: seed,
         source_key: "mock",
@@ -432,7 +432,7 @@ export class PhotoGalleryService {
         },
       });
     }
-
+    
     return mockImages;
   }
 
@@ -509,10 +509,10 @@ export class PhotoGalleryService {
         }
       } else {
         result = await this.getFeaturedImagesWithRetry({
-          category: categorySlug,
+        category: categorySlug,
           limit: limit * 2,
           priority: "desc",
-          metadata: true,
+        metadata: true,
           maxRetries: 1,
         });
       }
@@ -647,8 +647,8 @@ export class PhotoGalleryService {
    */
   async getRandomImages(limit: number = 5): Promise<string[]> {
     try {
-      const result = await this.getFeaturedImagesWithRetry({
-        limit: limit * 2,
+      const result = await this.getFeaturedImagesWithRetry({ 
+        limit: limit * 2, 
         metadata: true,
         maxRetries: 1,
       });
@@ -691,10 +691,10 @@ export class PhotoGalleryService {
           const featuredResult = await this.getFeaturedImagesWithRetry({
             category: options.categorySlug,
             type: "featured",
-            limit: limit * 2,
-            metadata: true,
-            maxRetries: 1,
-          });
+        limit: limit * 2, 
+        metadata: true,
+        maxRetries: 1,
+      });
           result.images = [...result.images, ...featuredResult.images];
         }
       } else {
@@ -706,12 +706,12 @@ export class PhotoGalleryService {
           maxRetries: 1,
         });
       }
-
+      
       // Filter by folder path
-      const folderImages = result.images.filter(img =>
+      const folderImages = result.images.filter(img => 
         img.folder_path?.includes(folderPath),
       );
-
+      
       logger.info(`📁 Found ${folderImages.length} images in folder "${folderPath}"${options.categorySlug ? ` (category: ${options.categorySlug})` : ""}`);
 
       return folderImages.slice(0, limit).map((img) => img.thumbnail_url).filter(Boolean);
@@ -742,12 +742,12 @@ export class PhotoGalleryService {
       }
 
       // Fallback: fetch featured images and derive folder paths
-      const result = await this.getFeaturedImagesWithRetry({
-        category: categorySlug,
+      const result = await this.getFeaturedImagesWithRetry({ 
+        category: categorySlug, 
         limit: 50,
         maxRetries: 1,
       });
-
+      
       if (result.images.length === 0) {
         // Return empty array - no mock fallback
         return [];
@@ -795,7 +795,7 @@ export class PhotoGalleryService {
         "Individual Portrait Collection",
       ],
     };
-
+    
     return mockFolders[categorySlug] || [`${categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1)} Collection`];
   }
-}
+} 

@@ -34,6 +34,16 @@ export interface MultiSitePublishingRequest {
   seoDescription?: string;
   targetSiteId?: string; // Optional: Force specific site
   contentType?: 'wedding' | 'pre-wedding' | 'yearbook-school' | 'yearbook-concept' | 'corporate' | 'general';
+  metadata?: {
+    featuredImageAlt?: string;
+    featuredImageCaption?: string;
+    galleryImages?: Array<{
+      url: string;
+      alt_text: string;
+      caption?: string;
+      is_featured?: boolean;
+    }>;
+  };
 }
 
 export interface MultiSitePublishingResult {
@@ -315,7 +325,11 @@ export class WordPressMultiSiteService {
         metadata: {
           keywords: postData.tags,
           seoTitle: postData.seoTitle,
-          seoDescription: postData.seoDescription
+          seoDescription: postData.seoDescription,
+          featuredImage: request.featuredImageUrl,
+          featuredImageAlt: request.metadata?.featuredImageAlt,
+          featuredImageCaption: request.metadata?.featuredImageCaption,
+          galleryImages: request.metadata?.galleryImages
         },
         aiGenerated: true,
         createdAt: new Date(),
@@ -493,7 +507,11 @@ export class WordPressMultiSiteService {
           metadata: {
             keywords: postData.tags,
             seoTitle: postData.seoTitle,
-            seoDescription: postData.seoDescription
+            seoDescription: postData.seoDescription,
+            featuredImage: request.featuredImageUrl,
+            featuredImageAlt: request.metadata?.featuredImageAlt,
+            featuredImageCaption: request.metadata?.featuredImageCaption,
+            galleryImages: request.metadata?.galleryImages
           },
           aiGenerated: true,
           createdAt: new Date(),

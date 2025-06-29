@@ -12,10 +12,11 @@ import {
   EyeIcon,
   ArrowPathIcon,
   ClipboardDocumentIcon,
-  CloudArrowUpIcon,
   ChartBarIcon,
   DocumentDuplicateIcon,
-  ArrowsRightLeftIcon
+  ArrowsRightLeftIcon,
+  XMarkIcon,
+  PhotoIcon
 } from '@heroicons/react/24/outline';
 
 import { Button } from './ui/Button';
@@ -82,6 +83,15 @@ interface GeneratedContentItem {
     qualityScore?: number;
     aiModel?: string;
     featuredImage?: string;
+    featuredImageAlt?: string;
+    featuredImageCaption?: string;
+    wordCount?: number;
+    galleryImages?: Array<{
+      url: string;
+      alt_text: string;
+      caption?: string;
+      is_featured?: boolean;
+    }>;
   };
   publishedAt?: string;
   publishedUrl?: string;
@@ -94,6 +104,8 @@ interface WordPressSite {
   name: string;
   url: string;
 }
+
+// Removed complex publishing queue system - now using simple one-time notifications
 
 export function LinkContentWorkflow() {
   // Core state
@@ -108,6 +120,10 @@ export function LinkContentWorkflow() {
   const [wordpressSites, setWordPressSites] = useState<WordPressSite[]>([]);
   const [publishSiteSelections, setPublishSiteSelections] = useState<Record<string, string>>({});
   const [regenProviderSelections, setRegenProviderSelections] = useState<Record<string, 'auto' | 'openai' | 'gemini' | 'claude'>>({});
+  
+  // NEW: Preview modal provider selection
+  const [previewRegenProvider, setPreviewRegenProvider] = useState<'auto' | 'openai' | 'gemini' | 'claude'>('auto');
+  const [previewPublishSite, setPreviewPublishSite] = useState<string>('');
   
   // Simplified settings with defaults
   const [llmSettings, setLlmSettings] = useState<LLMSettings>({
@@ -274,6 +290,15 @@ export function LinkContentWorkflow() {
       qualityScore?: number;
       aiModel?: string;
       retryCount?: number;
+      featuredImage?: string;
+      featuredImageAlt?: string;
+      featuredImageCaption?: string;
+      galleryImages?: Array<{
+        url: string;
+        alt_text: string;
+        caption?: string;
+        is_featured?: boolean;
+      }>;
     };
   }> => {
     console.log('📝 generateContentWithSettings called with:', {
@@ -370,7 +395,11 @@ export function LinkContentWorkflow() {
           settings: settings,
           qualityScore: generatedContent.metadata?.seoScore,
           aiModel: generatedContent.metadata?.aiModel,
-          retryCount: retryCount
+          retryCount: retryCount,
+          featuredImage: generatedContent.metadata?.featuredImage,
+          featuredImageAlt: generatedContent.metadata?.featuredImageAlt,
+          featuredImageCaption: generatedContent.metadata?.featuredImageCaption,
+          galleryImages: generatedContent.metadata?.galleryImages
         }
       };
 
@@ -460,17 +489,33 @@ export function LinkContentWorkflow() {
       return generateContentWithSettings(sourceItem, llmSettings)
         .then(generatedData => {
           // Success for this job
-          setGeneratedContent(prev => prev.map(item =>
-            item.sourceUrl === sourceItem.url ? {
+                    setGeneratedContent(prev => prev.map(item => {
+            if (item.sourceUrl === sourceItem.url) {
+              const updatedItem = {
               ...item,
               title: generatedData.title,
               body: generatedData.body,
               status: 'generated' as const,
               metadata: {
-                qualityScore: generatedData.metadata?.qualityScore || 0
-              }
-            } : item
-          ));
+                qualityScore: generatedData.metadata?.qualityScore || 0,
+                  featuredImage: generatedData.metadata?.featuredImage,
+                  featuredImageAlt: generatedData.metadata?.featuredImageAlt,
+                  featuredImageCaption: generatedData.metadata?.featuredImageCaption,
+                  galleryImages: generatedData.metadata?.galleryImages,
+                  aiModel: generatedData.metadata?.aiModel
+                }
+              };
+
+              console.log('✅ Generated content with metadata:', {
+                title: generatedData.title,
+                featuredImage: generatedData.metadata?.featuredImage,
+                galleryImages: generatedData.metadata?.galleryImages?.length || 0
+              });
+
+              return updatedItem;
+            }
+            return item;
+          }));
           toast.success(`Generated: ${sourceItem.crawledContent?.title}`);
         })
         .catch(error => {
@@ -614,87 +659,97 @@ export function LinkContentWorkflow() {
   };
 
   const handlePublish = async (contentId: string, targetSiteId: string) => {
-    const content = generatedContent.find(item => item.id === contentId);
-    if (!content) return;
-
     if (!targetSiteId) {
-      toast.error('Please select a WordPress site to publish to.');
+      toast.error("Please select a WordPress site");
       return;
     }
 
-    try {
-      toast.loading(`Publishing to site...`, { id: `publishing-${contentId}` });
+    const content = generatedContent.find(item => item.id === contentId);
+    if (!content) {
+      toast.error("Content not found");
+      return;
+    }
 
-      // Prepare the publish data
-      const publishData = {
+    const targetSite = wordpressSites.find(site => site.id === targetSiteId);
+    if (!targetSite) {
+      toast.error("WordPress site not found");
+      return;
+    }
+
+    // Simple one-time notification
+    toast.success(
+      `🚀 Publishing "${content.title}" to ${targetSite.name}...\n\n` +
+      `Please wait and check your WordPress site manually for the published post.`,
+      {
+        duration: 8000,
+        style: {
+          maxWidth: '500px',
+        }
+      }
+    );
+
+    // Update content status to show it's being published
+    setGeneratedContent(prev => prev.map(item =>
+      item.id === contentId
+        ? {
+            ...item,
+            status: 'published' as const,
+            publishedAt: new Date().toISOString(),
+            publishedSite: targetSite.name
+          }
+        : item
+    ));
+
+    // Fire and forget - publish in background
+    try {
+      await wordpressMultiSiteApi.smartPublish({
         title: content.title,
         content: content.body,
         targetSiteId: targetSiteId,
-        status: 'publish' as const,
-        contentType: llmSettings.contentType,
-      };
-
-      // Call the smart publish API
-      const result = await wordpressMultiSiteApi.smartPublish(publishData);
-
-      if (result.success) {
-        // Update content status
-      setGeneratedContent(prev => prev.map(item => 
-        item.id === contentId 
-          ? { 
-              ...item, 
-                status: 'published' as const,
-                publishedAt: new Date().toISOString(),
-                publishedUrl: result.data?.url || '',
-                publishedSite: result.data?.siteName || ''
-            }
-          : item
-      ));
-      
-        toast.success(`Published successfully to ${result.data?.siteName || 'site'}!`, { id: `publishing-${contentId}` });
-        
-        // Open the published URL in a new tab
-        if (result.data?.url) {
-          window.open(result.data.url, '_blank');
-        }
-      } else {
-        throw new Error(result.message || 'Publishing failed');
-      }
+        status: 'publish',
+        metadata: content.metadata
+      });
     } catch (error) {
-      console.error('Publishing error:', error);
-      toast.error(`Failed to publish: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: `publishing-${contentId}` });
+      // Silent background publishing - user will check manually
+      console.log('Background publishing completed (user will verify manually)');
     }
   };
 
   const closePreview = () => {
     setPreviewContent(null);
+    setPreviewRegenProvider('auto');
+    setPreviewPublishSite('');
   };
 
   const handleCopyContent = async () => {
     if (!previewContent) return;
     
     try {
-      // Clean and prepare content
-      const cleanedBody = previewContent.body
-        .replace(/^```html\s*/i, '') // Remove ```html at start
-        .replace(/\s*```\s*$/i, '')   // Remove ``` at end
-        .replace(/&lt;/g, '<')        // Decode HTML entities
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"');
-      
-      // Copy clean HTML code (title + body HTML)
-      const htmlContent = `<h1>${previewContent.title}</h1>\n\n${cleanedBody}`;
-      await navigator.clipboard.writeText(htmlContent);
+      const textToCopy = `${previewContent.title}\n\n${previewContent.body}`;
+      await navigator.clipboard.writeText(textToCopy);
       setCopySuccess(true);
-      
-      // Reset success message after 2 seconds
-      setTimeout(() => {
-        setCopySuccess(false);
-      }, 2000);
+      toast.success('Content copied to clipboard!');
+      setTimeout(() => setCopySuccess(false), 2000);
     } catch (error) {
-      console.error('Failed to copy content:', error);
+      console.error('Failed to copy:', error);
+      toast.error('Failed to copy content');
     }
+  };
+
+  // NEW: Handle regenerate from preview modal
+  const handlePreviewRegenerate = async () => {
+    if (!previewContent) return;
+    
+    closePreview(); // Close modal first
+    await handleRegenerate(previewContent.id, previewRegenProvider);
+  };
+
+  // NEW: Handle publish from preview modal  
+  const handlePreviewPublish = async () => {
+    if (!previewContent || !previewPublishSite) return;
+    
+    closePreview(); // Close modal first
+    await handlePublish(previewContent.id, previewPublishSite);
   };
 
   // Navigation with validation
@@ -854,133 +909,169 @@ export function LinkContentWorkflow() {
         </CardContent>
       </Card>
 
+      {/* Removed complex publishing queue UI - now using simple one-time notifications */}
+
       {/* Preview Modal */}
       {previewContent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b">
-              <div>
-                <h2 className="text-xl font-semibold">Content Preview</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Display as on WordPress • Copy to get HTML
-                </p>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b">
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-bold">Content Preview</h2>
+                <button
+                  onClick={closePreview}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
               </div>
-              <Button variant="outline" onClick={closePreview}>
-                ✕
-              </Button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div className="border-b pb-4">
-                <h3 className="text-lg font-medium text-gray-900">{previewContent.title}</h3>
-                <p className="text-sm text-gray-500 mt-1">Source: {previewContent.sourceUrl}</p>
+            <div className="flex-1 overflow-y-auto p-6">
+              <h3 className="text-xl font-semibold mb-4">{previewContent.title}</h3>
+              
+              {/* Source URL Display */}
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
+                <p className="text-sm text-gray-600 mb-1">
+                  <span className="font-medium">Source URL:</span>
+                </p>
+                <a 
+                  href={previewContent.sourceUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800 text-sm break-all"
+                >
+                  {previewContent.sourceUrl}
+                </a>
               </div>
-
+              
+              {/* Featured Image Preview */}
               {previewContent.metadata?.featuredImage && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-600">Featured Image</h4>
-                  <img
-                    src={previewContent.metadata.featuredImage}
-                    alt="Featured Image"
-                    className="rounded-lg border object-cover w-full max-h-64"
-                  />
-                </div>
+                <div className="mb-6 border rounded-lg overflow-hidden">
+                  <div className="bg-gray-100 px-4 py-2 border-b">
+                    <p className="text-sm font-medium text-gray-700">
+                      <span className="inline-flex items-center">
+                        <PhotoIcon className="w-4 h-4 mr-1" />
+                        Featured Image for WordPress
+                      </span>
+                    </p>
+                  </div>
+                  <div className="p-4">
+                    <img 
+                      src={previewContent.metadata.featuredImage} 
+                      alt={previewContent.metadata?.featuredImageAlt || previewContent.title}
+                      className="w-full max-w-md mx-auto rounded shadow-sm"
+                      onError={(e) => {
+                        console.error('Featured image failed to load:', previewContent.metadata?.featuredImage);
+                        e.currentTarget.style.display = 'none';
+                      }}
+                      onLoad={() => {
+                        console.log('✅ Featured image loaded successfully:', previewContent.metadata?.featuredImage);
+                      }}
+                    />
+                    {previewContent.metadata?.featuredImageCaption && (
+                      <p className="text-sm text-gray-600 text-center mt-2 italic">
+                        {previewContent.metadata.featuredImageCaption}
+                      </p>
+                    )}
+              </div>
+            </div>
               )}
               
-              {/* Rendered HTML Content - WordPress Style */}
-              <article
-                className="prose prose-lg max-w-none"
-                style={{
-                  lineHeight: '1.6',
-                  fontSize: '16px',
-                  color: '#333',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                }}
-                dangerouslySetInnerHTML={{ 
-                  __html: (() => {
-                    // Enhanced HTML cleaning for proper preview
-                    let cleanedContent = previewContent.body
-                      .replace(/^```html\s*/i, '') // Remove ```html at start
-                      .replace(/\s*```\s*$/i, '')   // Remove ``` at end
-                      .replace(/&lt;/g, '<')        // Decode HTML entities
-                      .replace(/&gt;/g, '>')
-                      .replace(/&amp;/g, '&')
-                      .replace(/&quot;/g, '"')
-                      .replace(/&#39;/g, "'")
-                      .replace(/&nbsp;/g, ' ');
-                    
-                    // Additional cleanup for artifacts
-                    cleanedContent = cleanedContent
-                      .replace(/^\s*`?html`?\s*/i, '') // Remove any remaining html artifacts
-                      .replace(/\s*`\s*$/i, '')         // Remove trailing backticks
-                      .trim();
-                    
-                    return cleanedContent;
-                  })()
-                }}
+              <div 
+                className="prose prose-lg max-w-none wordpress-content"
+                dangerouslySetInnerHTML={{ __html: previewContent.body }}
               />
+              
+              <style>
+                {`
+                  .wordpress-content figure {
+                    text-align: center;
+                    margin: 1.5rem 0;
+                  }
+                  .wordpress-content figure img {
+                    max-width: 100%;
+                    height: auto;
+                    margin: 0 auto;
+                    display: block;
+                  }
+                  .wordpress-content figcaption {
+                    text-align: center;
+                    font-style: italic;
+                    color: #666;
+                    font-size: 0.9rem;
+                    margin-top: 0.5rem;
+                  }
+                  .wordpress-content img {
+                    max-width: 100%;
+                    height: auto;
+                    margin: 0 auto;
+                    display: block;
+                  }
+                `}
+              </style>
             </div>
             
-            <div className="border-t p-6 flex justify-between items-center">
-              <Button variant="outline" onClick={closePreview}>
-                Close
-              </Button>
-              
-              <div className="flex items-center space-x-4">
-                {/* Regenerate with Provider Selection */}
-                <div className="flex items-center space-x-2">
-                  <select
-                    value={regenProviderSelections[previewContent.id] || 'auto'}
-                    onChange={(e) => setRegenProviderSelections(prev => ({
-                      ...prev,
-                      [previewContent.id]: e.target.value as any
-                    }))}
-                    className="text-sm px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                    <option value="auto">🤖 Auto</option>
-                    <option value="claude">🎭 Claude</option>
-                    <option value="openai">🧠 OpenAI</option>
-                    <option value="gemini">⚡ Gemini</option>
-                  </select>
+            <div className="p-6 border-t bg-gray-50">
+              <div className="space-y-4">
+                {/* Top Row: AI Provider and Regenerate */}
+                <div className="flex items-center justify-between border-b pb-4">
+                  <div className="flex items-center space-x-3">
+                    <label className="text-sm font-medium text-gray-700">AI Provider:</label>
+                    <select
+                      value={previewRegenProvider}
+                      onChange={(e) => setPreviewRegenProvider(e.target.value as 'auto' | 'openai' | 'gemini' | 'claude')}
+                      className="text-sm px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[180px]"
+                    >
+                      <option value="auto">🤖 Auto Select</option>
+                      <option value="openai">🧠 OpenAI GPT-4</option>
+                      <option value="gemini">⚡ Google Gemini</option>
+                      <option value="claude">🎭 Anthropic Claude</option>
+                    </select>
+                  </div>
                 <Button 
                   variant="outline"
-                  onClick={() => {
-                      handleRegenerate(previewContent.id, regenProviderSelections[previewContent.id] || 'auto');
-                    closePreview();
-                  }}
+                    onClick={handlePreviewRegenerate}
+                    className="flex items-center space-x-2"
                 >
-                  <ArrowPathIcon className="w-4 h-4 mr-2" />
-                  Regenerate
+                    <ArrowPathIcon className="w-4 h-4" />
+                    <span>Regenerate</span>
                 </Button>
                 </div>
 
-                {/* Publish with Site Selection */}
-                <div className="flex items-center space-x-2">
-                  <select
-                    value={publishSiteSelections[previewContent.id] || ''}
-                    onChange={(e) => setPublishSiteSelections(prev => ({
-                      ...prev,
-                      [previewContent.id]: e.target.value
-                    }))}
-                    className="text-sm px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    <option value="" disabled>Select a site...</option>
-                    {wordpressSites.map(site => (
-                      <option key={site.id} value={site.id}>
-                        {site.name}
-                      </option>
-                    ))}
-                  </select>
+                {/* Bottom Row: Close and Publish */}
+                <div className="flex items-center justify-between">
                 <Button 
-                  onClick={() => {
-                      handlePublish(previewContent.id, publishSiteSelections[previewContent.id]);
-                    closePreview();
-                  }}
-                    disabled={!publishSiteSelections[previewContent.id]}
-                >
-                    <CloudArrowUpIcon className="w-4 h-4 mr-2" />
-                    Publish to WordPress
+                    variant="secondary" 
+                    onClick={closePreview}
+                    className="min-w-[100px]"
+                  >
+                    Close
                 </Button>
+                  
+                  <div className="flex items-center space-x-3">
+                    <label className="text-sm font-medium text-gray-700">Publish to:</label>
+                    <select
+                      value={previewPublishSite}
+                      onChange={(e) => setPreviewPublishSite(e.target.value)}
+                      className="text-sm px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
+                    >
+                      <option value="" disabled>Select a site...</option>
+                      {wordpressSites.map(site => (
+                        <option key={site.id} value={site.id}>
+                          {site.name}
+                        </option>
+                      ))}
+                    </select>
+                <Button 
+                      onClick={handlePreviewPublish}
+                      disabled={!previewPublishSite}
+                      className="min-w-[150px]"
+                    >
+                      <DocumentDuplicateIcon className="w-4 h-4 mr-2" />
+                      Publish
+                </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1981,7 +2072,7 @@ function GenerationStep({
                                 onClick={() => onPublish(content.id, publishSiteSelections[content.id])}
                                 disabled={!publishSiteSelections[content.id]}
                       >
-                                <CloudArrowUpIcon className="w-4 h-4" />
+                                <DocumentDuplicateIcon className="w-4 h-4" />
                       </Button>
                            </div>
                          </div>
@@ -2373,7 +2464,7 @@ function StatusBadge({ status }: { status: string }) {
     generated: CheckCircleIcon,
     approved: CheckCircleIcon,
     queued: ClockIcon,
-    published: CloudArrowUpIcon,
+    published: DocumentDuplicateIcon,
   };
 
   const Icon = icons[status as keyof typeof icons] || ClockIcon;

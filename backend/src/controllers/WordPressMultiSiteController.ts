@@ -98,7 +98,7 @@ export class WordPressMultiSiteController {
    * Smart publish content with AI routing
    */
   smartPublish = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const { title, content, excerpt, categories, tags, contentType, targetSiteId } = req.body;
+    const { title, content, excerpt, categories, tags, contentType, targetSiteId, featuredImageUrl, metadata } = req.body;
     
     if (!title || !content) {
       res.status(400).json({
@@ -116,7 +116,9 @@ export class WordPressMultiSiteController {
       tags: tags || [],
       status: 'publish',
       contentType,
-      targetSiteId
+      targetSiteId,
+      featuredImageUrl,
+      metadata
     };
 
     logger.info(`📝 Smart publishing: ${title}`);

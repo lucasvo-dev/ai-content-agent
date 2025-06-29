@@ -8,6 +8,7 @@ import { HybridAIService } from './services/HybridAIService.js';
 import { LinkContentController } from './controllers/LinkContentController.js';
 import { WordPressMultiSiteController } from './controllers/WordPressMultiSiteController.js';
 import { PhotoGalleryService } from './services/PhotoGalleryService.js';
+import { EnhancedContentService } from './services/EnhancedContentService.js';
 import { logger } from './utils/logger.js';
 import { WordPressMultiSiteService } from './services/WordPressMultiSiteService.js';
 import axios from 'axios';
@@ -213,7 +214,7 @@ app.post('/api/v1/link-content/generate-enhanced', async (req, res) => {
     // Frontend sends { request: {...} }, so we need to extract the request
     const requestData = req.body.request || req.body;
     
-    // Transform request to match HybridAIService expectations
+    // Transform request to match EnhancedContentService expectations
     const transformedRequest = {
       type: requestData.type || 'blog_post',
       topic: requestData.topic,
@@ -223,29 +224,22 @@ app.post('/api/v1/link-content/generate-enhanced', async (req, res) => {
         tone: requestData.tone || 'professional',
         style: 'conversational',
         vocabulary: 'industry-specific',
-        length: 'detailed'
+        length: 'detailed',
+        brandName: requestData.brandVoice?.brandName || requestData.brandName
       },
       context: requestData.context,
       preferredProvider: requestData.preferredProvider || 'auto',
+      language: requestData.language || 'vietnamese',
       imageSettings: requestData.imageSettings
     };
     
     console.log('🔄 Transformed request:', JSON.stringify(transformedRequest, null, 2));
     
-    // Call AI service with transformed request
-    const content = await aiService.generateContent(transformedRequest);
+    // Use EnhancedContentService which handles featured image selection
+    const enhancedContentService = new EnhancedContentService();
+    const finalContent = await enhancedContentService.generateContentWithImages(transformedRequest);
     
-    // Enhanced: Process and insert images if requested
-    let finalContent = content;
-    if (requestData.imageSettings?.includeImages) {
-      try {
-        console.log('🖼️ Processing images for enhanced content...');
-        finalContent = await insertImagesIntoContent(content, requestData.imageSettings);
-      } catch (imageError) {
-        console.warn('⚠️ Image processing failed, proceeding without images:', imageError);
-        // Don't fail the entire generation, just proceed without images
-      }
-    }
+    console.log('✅ Enhanced content generated with featured image:', !!finalContent.metadata?.featuredImage);
     
     res.json({
       success: true,

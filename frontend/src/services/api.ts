@@ -47,6 +47,15 @@ const scrapingApi = axios.create({
   },
 });
 
+// Separate API instance for WordPress publishing with extended timeout
+const publishingApi = axios.create({
+  baseURL: `${API_BASE_URL}/api/v1`,
+  timeout: 90000, // 90 seconds for WordPress publishing (image uploads can be slow)
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
 // Request interceptor for auth tokens (future)
 api.interceptors.request.use((config) => {
   // Add auth token when available
@@ -210,18 +219,24 @@ export const wordpressMultiSiteApi = {
   smartPublish: async (data: { 
     title: string; 
     content: string; 
-    targetSite?: string;
+    targetSiteId?: string;
     status?: 'publish' | 'draft' | 'pending';
     categories?: string[];
     tags?: string[];
     contentType?: string;
+    featuredImageUrl?: string;
+    metadata?: any;
   }) => {
-    // Using axios instance for consistency and better error handling
-    const response = await api.post<ApiResponse<{
+    console.log('🚀 Smart publish API called with:', data);
+    
+    // Using publishingApi instance with extended timeout for WordPress operations
+    const response = await publishingApi.post<ApiResponse<{
       url: string;
       siteName: string;
       postId: number | string;
     }>>('/wordpress-multisite/smart-publish', data);
+
+    console.log('📥 Smart publish API response:', response.data);
 
     if (!response.data.success) {
       const errorMsg = response.data.error?.message || response.data.message || 'Failed to smart publish';

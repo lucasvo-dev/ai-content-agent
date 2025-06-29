@@ -195,24 +195,72 @@ export class WordPressService {
       // Prepare WordPress post data
       const postData = await this.preparePostData(content, settings);
 
-      // Create the post
-      const response = await this.client.post('/posts', postData);
+      // Create the post with a shorter initial timeout
+      let postId: string | null = null;
+      
+      try {
+        const response = await this.client.post('/posts', postData, {
+          timeout: 30000 // 30 seconds initial timeout
+        });
 
-      if (response.status !== 201) {
-        throw new WordPressError(`Failed to create post. Status: ${response.status}`);
+        if (response.status === 201) {
+          postId = response.data.id.toString();
+          console.log(`✅ Post created successfully. Post ID: ${postId}`);
+          
+          return {
+            success: true,
+            externalId: postId,
+            externalUrl: response.data.link,
+            message: 'Content published to WordPress successfully',
+            publishedAt: new Date(response.data.date),
+          };
+        }
+      } catch (error: any) {
+        // Check if it's a timeout error
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+          console.log('⏱️ Initial request timed out, attempting to verify post creation...');
+          
+          // Wait a bit then check if post was created
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Search for the post by title
+          const searchResponse = await this.client.get('/posts', {
+            params: {
+              search: content.title,
+              status: 'any',
+              per_page: 5,
+              orderby: 'date',
+              order: 'desc'
+            },
+            timeout: 10000
+          });
+          
+          // Check if we find a recent post with matching title
+          const recentPost = searchResponse.data.find((post: any) => {
+            const postDate = new Date(post.date_gmt + 'Z'); // Ensure UTC
+            const timeDiff = Date.now() - postDate.getTime();
+            // Check if post was created within last 2 minutes
+            return post.title.rendered === content.title && timeDiff < 120000;
+          });
+          
+          if (recentPost) {
+            console.log(`✅ Post verified after timeout. Post ID: ${recentPost.id}`);
+            return {
+              success: true,
+              externalId: recentPost.id.toString(),
+              externalUrl: recentPost.link,
+              message: 'Content published to WordPress successfully (verified after timeout)',
+              publishedAt: new Date(recentPost.date),
+            };
+          }
+        }
+        
+        // If not timeout or post not found, throw the original error
+        throw error;
       }
 
-      const post = response.data;
-      
-      console.log(`Successfully published to WordPress. Post ID: ${post.id}`);
-
-      return {
-        success: true,
-        externalId: post.id.toString(),
-        externalUrl: post.link,
-        message: 'Content published to WordPress successfully',
-        publishedAt: new Date(post.date),
-      };
+      // If we get here without returning, something went wrong
+      throw new WordPressError(`Failed to create post. Unexpected response.`);
 
     } catch (error) {
       console.error('WordPress publishing failed:', error);
@@ -261,41 +309,234 @@ export class WordPressService {
   }
 
   /**
+   * Process and upload all images in content to WordPress media library
+   */
+  private async processContentImages(content: Content): Promise<{
+    processedBody: string;
+    featuredImageId?: number;
+  }> {
+    try {
+      logger.info('🖼️ Processing images in content...');
+      
+      let processedBody = content.body;
+      let featuredImageId: number | undefined;
+      const uploadedImages: Map<string, { id: number; url: string }> = new Map();
+      
+      // FIRST: Check and upload featured image from metadata (highest priority)
+      if (content.metadata?.featuredImage) {
+        try {
+          const featuredImageUrl = content.metadata.featuredImage;
+          const featuredImageAlt = content.metadata.featuredImageAlt || content.title;
+          const featuredImageCaption = content.metadata.featuredImageCaption || '';
+          
+          logger.info('📌 Found featured image in metadata, uploading with highest priority...');
+          logger.info(`   URL: ${featuredImageUrl}`);
+          logger.info(`   Alt: ${featuredImageAlt}`);
+          
+          const imageResponse = await axios.get(featuredImageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+          });
+          
+          const uploadResult = await this.uploadImageToWordPress(
+            Buffer.from(imageResponse.data),
+            `${content.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-featured.jpg`,
+            featuredImageAlt,
+            featuredImageCaption
+          );
+          
+          featuredImageId = uploadResult.id;
+          logger.info(`✅ Featured image from metadata uploaded successfully (ID: ${featuredImageId})`);
+        } catch (error) {
+          logger.error('❌ Failed to upload featured image from metadata:', error);
+        }
+      }
+      
+      // Extract all image URLs from content
+      const imageRegex = /<img[^>]+src="([^"]+)"[^>]*>/g;
+      const imageMatches = Array.from(content.body.matchAll(imageRegex));
+      
+      if (imageMatches.length === 0) {
+        logger.info('No images found in content body');
+        return { processedBody, featuredImageId };
+      }
+      
+      logger.info(`Found ${imageMatches.length} images in content body to process`);
+      
+      // Process each image
+      for (let i = 0; i < imageMatches.length; i++) {
+        const match = imageMatches[i];
+        const originalUrl = match[1];
+        const fullMatch = match[0];
+        
+        try {
+          // Skip if already uploaded
+          if (uploadedImages.has(originalUrl)) {
+            const uploaded = uploadedImages.get(originalUrl)!;
+            processedBody = processedBody.replace(originalUrl, uploaded.url);
+            continue;
+          }
+          
+          // Extract alt text and other attributes
+          const altMatch = fullMatch.match(/alt="([^"]*)"/);
+          const altText = altMatch ? altMatch[1] : content.title;
+          
+          // Generate filename
+          const filename = `${content.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${i + 1}.jpg`;
+          
+          // Download image
+          logger.info(`Downloading image ${i + 1}/${imageMatches.length}: ${originalUrl}`);
+          const imageResponse = await axios.get(originalUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+          });
+          
+          // Upload to WordPress
+          const uploadResult = await this.uploadImageToWordPress(
+            Buffer.from(imageResponse.data),
+            filename,
+            altText,
+            altText
+          );
+          
+          // Store the mapping
+          uploadedImages.set(originalUrl, uploadResult);
+          
+          // Replace URL in content
+          processedBody = processedBody.replace(originalUrl, uploadResult.url);
+          
+          // Only set as featured if we don't already have one from metadata
+          if (!featuredImageId && i === 0) {
+            featuredImageId = uploadResult.id;
+            logger.info(`📌 Set first content image as featured (ID: ${uploadResult.id}) - no metadata featured image`);
+          }
+          
+        } catch (error) {
+          logger.error(`Failed to process image ${originalUrl}:`, error);
+          // Continue with original URL if upload fails
+        }
+      }
+      
+      // If still no featured image, try gallery images as last resort
+      if (!featuredImageId && content.metadata?.galleryImages?.length > 0) {
+        try {
+          logger.info('📌 No featured image yet, checking gallery images...');
+          
+          // Look for a landscape image first
+          const landscapeImage = content.metadata.galleryImages.find(img => 
+            img.is_featured || this.isLikelyLandscape(img.url)
+          );
+          
+          const selectedImage = landscapeImage || content.metadata.galleryImages[0];
+          const featuredImageUrl = selectedImage.url;
+          const featuredImageAlt = selectedImage.alt_text || content.title;
+          const featuredImageCaption = selectedImage.caption || '';
+          
+          logger.info(`Using ${landscapeImage ? 'landscape' : 'first'} gallery image as featured`);
+          
+          const imageResponse = await axios.get(featuredImageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+          });
+          
+          const uploadResult = await this.uploadImageToWordPress(
+            Buffer.from(imageResponse.data),
+            `${content.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-featured-gallery.jpg`,
+            featuredImageAlt,
+            featuredImageCaption
+          );
+          
+          featuredImageId = uploadResult.id;
+          logger.info(`✅ Gallery image uploaded as featured (ID: ${featuredImageId})`);
+        } catch (error) {
+          logger.error('Failed to upload gallery image as featured:', error);
+        }
+      }
+      
+      logger.info(`✅ Image processing complete. Uploaded ${uploadedImages.size} content images. Featured image ID: ${featuredImageId || 'none'}`);
+      return { processedBody, featuredImageId };
+      
+    } catch (error) {
+      logger.error('Error processing content images:', error);
+      return { processedBody: content.body, featuredImageId: undefined };
+    }
+  }
+
+  /**
    * Prepare WordPress post data from content
    */
   private async preparePostData(content: Content, settings: PublishSettings): Promise<any> {
-    const { status, scheduledDate, categories, tags } = settings;
-
+    // Process images first
+    const { processedBody, featuredImageId } = await this.processContentImages(content);
+    
+    // Add custom CSS for centered figcaptions
+    const styledContent = `
+      <style>
+        figure {
+          text-align: center;
+          margin: 1.5rem 0;
+        }
+        figure img {
+          max-width: 100%;
+          height: auto;
+          margin: 0 auto;
+          display: block;
+        }
+        figcaption {
+          text-align: center !important;
+          font-style: italic;
+          color: #666;
+          font-size: 0.9rem;
+          margin-top: 0.5rem;
+          padding: 0 1rem;
+        }
+        .wp-caption {
+          text-align: center !important;
+        }
+        .wp-caption-text {
+          text-align: center !important;
+          font-style: italic;
+          color: #666;
+          font-size: 0.9rem;
+          margin-top: 0.5rem;
+        }
+      </style>
+      ${processedBody}
+    `;
+    
     const postData: any = {
       title: content.title,
-      content: content.body,
+      content: styledContent, // Use styled content with centered figcaptions
       excerpt: content.excerpt || this.generateExcerpt(content.body),
-      status: status || 'draft',
+      status: settings.status || 'draft',
     };
 
-    if (scheduledDate) {
-      postData.date = scheduledDate.toISOString();
-    }
-    
-    if (categories && categories.length > 0) {
-      postData.categories = await this.resolveCategoryIds(categories);
+    // Handle scheduled publishing
+    if (settings.scheduledDate) {
+      postData.date = settings.scheduledDate.toISOString();
+      postData.status = 'future';
     }
 
-    if (tags && tags.length > 0) {
-      postData.tags = await this.resolveTagIds(tags);
+    // Handle categories
+    if (settings.categories && settings.categories.length > 0) {
+      postData.categories = await this.resolveCategoryIds(settings.categories);
     }
-    
-    // Upload and set the featured image if available
-    const featuredImageUrl = content.metadata?.featuredImage;
-    if (featuredImageUrl) {
+
+    // Handle tags
+    if (settings.tags && settings.tags.length > 0) {
+      postData.tags = await this.resolveTagIds(settings.tags);
+    }
+
+    // Set featured image
+    if (featuredImageId) {
+      postData.featured_media = featuredImageId;
+    } else if (settings.featuredImageUrl) {
+      // Fallback to settings featured image if no image found in content
       try {
-        logger.info(`📸 Uploading featured image from: ${featuredImageUrl}`);
-        const imageId = await this.uploadFeaturedImage(featuredImageUrl, content.title);
-        postData.featured_media = imageId;
-        logger.info(`✅ Featured image uploaded successfully. Media ID: ${imageId}`);
+        const mediaId = await this.uploadFeaturedImage(settings.featuredImageUrl, content.title);
+        postData.featured_media = mediaId;
       } catch (error) {
-        logger.error("⚠️ Failed to upload featured image, continuing without it.", error);
-        // Don't block publishing if image fails
+        console.warn('Failed to upload featured image from settings:', error);
       }
     }
 
@@ -310,6 +551,19 @@ export class WordPressService {
     }
 
     return postData;
+  }
+
+  /**
+   * Check if image URL is likely a landscape image based on naming patterns
+   */
+  private isLikelyLandscape(imageUrl: string): boolean {
+    const url = imageUrl.toLowerCase();
+    // Look for landscape indicators in URL/filename
+    return url.includes('landscape') || 
+           url.includes('wide') || 
+           url.includes('horizontal') ||
+           url.includes('banner') ||
+           !url.includes('portrait') && !url.includes('vertical');
   }
 
   /**
@@ -407,30 +661,37 @@ export class WordPressService {
    */
   private async uploadFeaturedImage(imageUrl: string, altText: string): Promise<number> {
     try {
-      // 1. Download the image from the URL
-      const response = await axios.get(imageUrl, {
+      // Download image
+      const imageResponse = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
+        timeout: 30000,
       });
-      const imageBuffer = Buffer.from(response.data, 'binary');
 
-      // 2. Determine the filename
-      const urlPath = new URL(imageUrl).pathname;
-      const filename = urlPath.substring(urlPath.lastIndexOf('/') + 1) || `${altText.replace(/\s+/g, '-').toLowerCase()}.jpg`;
+      // Extract filename from URL or generate one
+      const urlParts = imageUrl.split('/');
+      const filename = urlParts[urlParts.length - 1] || `featured-image-${Date.now()}.jpg`;
 
-      // 3. Upload to WordPress
-      const uploadResult = await this.uploadImageToWordPress(
-        imageBuffer,
-        filename,
-        altText
-      );
+      // Upload to WordPress
+      const uploadResponse = await this.client.post('/media', imageResponse.data, {
+        headers: {
+          'Content-Type': imageResponse.headers['content-type'] || 'image/jpeg',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        },
+      });
 
-      return uploadResult.id;
+      if (uploadResponse.status === 201) {
+        // Update media metadata
+        await this.client.put(`/media/${uploadResponse.data.id}`, {
+          alt_text: altText,
+          caption: altText,
+        });
+
+        return uploadResponse.data.id;
+      }
+
+      throw new Error(`Failed to upload image. Status: ${uploadResponse.status}`);
     } catch (error) {
-      logger.error('Failed to upload featured image', { error });
-      throw new WordPressError(
-        'Could not upload featured image to WordPress',
-        error instanceof Error ? error : undefined
-      );
+      throw new WordPressError('Failed to upload featured image', error);
     }
   }
 
