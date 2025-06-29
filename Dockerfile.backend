@@ -13,7 +13,7 @@ RUN npm install --legacy-peer-deps
 # Copy the rest of the backend source code
 COPY backend/ ./
 
-# Build the TypeScript code to JavaScript
+# Build the TypeScript code to JavaScript (Force rebuild 2025-01-31)
 RUN npm run build
 
 # Stage 2: Create the production image
