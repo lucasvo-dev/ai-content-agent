@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { WordPressError } from '@/utils/errors';
 import type { Content, PublishResult, PlatformCredentials } from '@/types';
 import { logger } from '../utils/logger';
+import { ImageProcessingService } from './ImageProcessingService';
 
 interface WordPressCredentials extends PlatformCredentials {
   siteUrl: string;
@@ -41,10 +42,12 @@ interface PublishSettings {
 export class WordPressService {
   private client: AxiosInstance;
   private credentials: WordPressCredentials;
+  private imageProcessor: ImageProcessingService;
 
   constructor(credentials: WordPressCredentials) {
     this.credentials = credentials;
     this.client = this.createClient();
+    this.imageProcessor = new ImageProcessingService();
   }
 
   private createClient(): AxiosInstance {
@@ -422,17 +425,48 @@ export class WordPressService {
         try {
           logger.info('📌 No featured image yet, checking gallery images...');
           
-          // Look for a landscape image first
-          const landscapeImage = content.metadata.galleryImages.find(img => 
-            this.isLikelyLandscape(img.url)
-          );
+          // ENHANCED: Look for landscape images more aggressively
+          let selectedImage = null;
           
-          const selectedImage = landscapeImage || content.metadata.galleryImages[0];
+          // Method 1: Look for images marked as landscape in metadata
+          const landscapeImages = content.metadata.galleryImages.filter(img => {
+            return (img.is_featured === true) || this.isLikelyLandscapeSync(img.url);
+          });
+          
+          if (landscapeImages.length > 0) {
+            selectedImage = landscapeImages[0];
+            logger.info(`✅ Found ${landscapeImages.length} potential landscape images, using first one`);
+          }
+          
+          // Method 2: If no landscape found, try to analyze each image
+          if (!selectedImage) {
+            logger.info('🔍 No obvious landscape images, analyzing each gallery image...');
+            
+            for (const img of content.metadata.galleryImages.slice(0, 3)) { // Check max 3 images
+              try {
+                const isLandscape = await this.isLikelyLandscape(img.url);
+                if (isLandscape) {
+                  selectedImage = img;
+                  logger.info(`✅ Found landscape image through analysis: ${img.url.substring(0, 60)}...`);
+                  break;
+                }
+              } catch (error) {
+                logger.warn(`Failed to analyze image ${img.url}: ${error.message}`);
+              }
+            }
+          }
+          
+          // Fallback: Use first image if no landscape found
+          if (!selectedImage) {
+            selectedImage = content.metadata.galleryImages[0];
+            logger.warn(`⚠️ No landscape images found, using first available image as fallback`);
+          }
+          
           const featuredImageUrl = selectedImage.url;
           const featuredImageAlt = selectedImage.alt_text || content.title;
           const featuredImageCaption = selectedImage.caption || '';
           
-          logger.info(`Using ${landscapeImage ? 'landscape' : 'first'} gallery image as featured`);
+          logger.info(`📤 Uploading selected gallery image as featured...`);
           
           const imageResponse = await axios.get(featuredImageUrl, {
             responseType: 'arraybuffer',
@@ -447,7 +481,11 @@ export class WordPressService {
           );
           
           featuredImageId = uploadResult.id;
-          logger.info(`✅ Gallery image uploaded as featured (ID: ${featuredImageId})`);
+          logger.info(`✅ Gallery image uploaded as featured:`, {
+            mediaId: featuredImageId,
+            isLandscape: uploadResult.metadata?.isLandscape || 'analyzed during upload',
+            aspectRatio: uploadResult.metadata?.aspectRatio?.toFixed(2) || 'unknown'
+          });
         } catch (error) {
           logger.error('Failed to upload gallery image as featured:', error);
         }
@@ -554,16 +592,55 @@ export class WordPressService {
   }
 
   /**
-   * Check if image URL is likely a landscape image based on naming patterns
+   * Check if image URL is likely a landscape image - ENHANCED with actual image analysis
    */
-  private isLikelyLandscape(imageUrl: string): boolean {
+  private async isLikelyLandscape(imageUrl: string): Promise<boolean> {
+    // First try URL pattern detection (fast fallback)
     const url = imageUrl.toLowerCase();
-    // Look for landscape indicators in URL/filename
+    const urlBasedGuess = url.includes('landscape') || 
+           url.includes('wide') || 
+           url.includes('horizontal') ||
+           url.includes('banner') ||
+           (!url.includes('portrait') && !url.includes('vertical'));
+
+    try {
+      // Download and analyze actual image (more accurate)
+      logger.info(`🔍 Analyzing image orientation: ${imageUrl.substring(0, 80)}...`);
+      
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000, // Shorter timeout for orientation check
+      });
+
+      const orientation = await this.imageProcessor.detectLandscape(Buffer.from(imageResponse.data));
+      
+      logger.info(`📐 Image orientation analysis:`, {
+        url: imageUrl.substring(0, 80) + '...',
+        actualOrientation: orientation.isLandscape ? 'landscape' : 'portrait',
+        aspectRatio: orientation.aspectRatio.toFixed(2),
+        dimensions: `${orientation.width}x${orientation.height}`,
+        urlBasedGuess: urlBasedGuess ? 'landscape' : 'portrait',
+        match: orientation.isLandscape === urlBasedGuess ? '✅' : '❌'
+      });
+
+      return orientation.isLandscape;
+      
+    } catch (error) {
+      logger.warn(`⚠️ Could not analyze image orientation, using URL-based guess:`, error.message);
+      return urlBasedGuess;
+    }
+  }
+
+  /**
+   * Synchronous version for backward compatibility
+   */
+  private isLikelyLandscapeSync(imageUrl: string): boolean {
+    const url = imageUrl.toLowerCase();
     return url.includes('landscape') || 
            url.includes('wide') || 
            url.includes('horizontal') ||
            url.includes('banner') ||
-           !url.includes('portrait') && !url.includes('vertical');
+           (!url.includes('portrait') && !url.includes('vertical'));
   }
 
   /**
@@ -657,10 +734,12 @@ export class WordPressService {
   }
 
   /**
-   * Upload featured image to WordPress media library
+   * Upload featured image to WordPress media library - ENHANCED with compression
    */
   private async uploadFeaturedImage(imageUrl: string, altText: string): Promise<number> {
     try {
+      logger.info(`🎯 Uploading featured image from URL: ${imageUrl.substring(0, 80)}...`);
+
       // Download image
       const imageResponse = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
@@ -669,47 +748,58 @@ export class WordPressService {
 
       // Extract filename from URL or generate one
       const urlParts = imageUrl.split('/');
-      const filename = urlParts[urlParts.length - 1] || `featured-image-${Date.now()}.jpg`;
+      const originalFilename = urlParts[urlParts.length - 1] || `featured-image-${Date.now()}.jpg`;
 
-      // Upload to WordPress
-      const uploadResponse = await this.client.post('/media', imageResponse.data, {
-        headers: {
-          'Content-Type': imageResponse.headers['content-type'] || 'image/jpeg',
-          'Content-Disposition': `attachment; filename="${filename}"`,
-        },
+      // Use enhanced upload method with compression
+      const uploadResult = await this.uploadImageToWordPress(
+        Buffer.from(imageResponse.data),
+        originalFilename,
+        altText,
+        altText
+      );
+
+      logger.info(`✅ Featured image uploaded successfully:`, {
+        mediaId: uploadResult.id,
+        isLandscape: uploadResult.metadata?.isLandscape || 'unknown',
+        aspectRatio: uploadResult.metadata?.aspectRatio?.toFixed(2) || 'unknown'
       });
 
-      if (uploadResponse.status === 201) {
-        // Update media metadata
-        await this.client.put(`/media/${uploadResponse.data.id}`, {
-          alt_text: altText,
-          caption: altText,
-        });
-
-        return uploadResponse.data.id;
-      }
-
-      throw new Error(`Failed to upload image. Status: ${uploadResponse.status}`);
+      return uploadResult.id;
     } catch (error) {
+      logger.error('❌ Failed to upload featured image:', error);
       throw new WordPressError('Failed to upload featured image', error);
     }
   }
 
   /**
-   * Upload image buffer to WordPress media library
+   * Upload image buffer to WordPress media library - ENHANCED with compression
    */
   async uploadImageToWordPress(
     imageBuffer: Buffer, 
     filename: string, 
     altText: string, 
     caption?: string
-  ): Promise<{ id: number; url: string; }> {
+  ): Promise<{ id: number; url: string; metadata?: any }> {
     try {
-      // Upload to WordPress
-      const uploadResponse = await this.client.post('/media', imageBuffer, {
+      logger.info(`🚀 Starting WordPress image upload: ${filename} (${(imageBuffer.length / 1024).toFixed(2)}KB)`);
+
+      // STEP 1: Compress and optimize image for WordPress
+      const optimized = await this.imageProcessor.optimizeForWordPress(imageBuffer);
+      
+      logger.info(`✅ Image optimization complete:`, {
+        original: `${(imageBuffer.length / 1024).toFixed(2)}KB`,
+        compressed: `${(optimized.buffer.length / 1024).toFixed(2)}KB`,
+        compressionRatio: `${(optimized.metadata.compressionRatio * 100).toFixed(1)}%`,
+        isLandscape: optimized.metadata.isLandscape,
+        aspectRatio: optimized.metadata.aspectRatio.toFixed(2),
+        dimensions: `${optimized.metadata.width}x${optimized.metadata.height}`
+      });
+
+      // STEP 2: Upload optimized image to WordPress
+      const uploadResponse = await this.client.post('/media', optimized.buffer, {
         headers: {
           'Content-Type': 'image/jpeg',
-          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Disposition': `attachment; filename="${optimized.filename}"`,
         },
       });
 
@@ -717,22 +807,34 @@ export class WordPressService {
         const mediaId = uploadResponse.data.id;
         const mediaUrl = uploadResponse.data.source_url;
 
-        // Update media metadata
+        // STEP 3: Update media metadata with enhanced information
+        const enhancedAltText = optimized.metadata.isLandscape 
+          ? `${altText} (Landscape ${optimized.metadata.aspectRatio.toFixed(2)}:1)` 
+          : altText;
+
         await this.client.put(`/media/${mediaId}`, {
-          alt_text: altText,
+          alt_text: enhancedAltText,
           caption: caption || altText,
+          description: `Optimized image - ${optimized.metadata.width}x${optimized.metadata.height}, ${optimized.metadata.isLandscape ? 'Landscape' : 'Portrait'}`
         });
 
-        logger.info(`Uploaded image to WordPress: ${filename} (ID: ${mediaId})`);
+        logger.info(`✅ Successfully uploaded to WordPress:`, {
+          filename: optimized.filename,
+          mediaId,
+          finalSize: `${(optimized.buffer.length / 1024).toFixed(2)}KB`,
+          isLandscape: optimized.metadata.isLandscape
+        });
 
         return {
           id: mediaId,
-          url: mediaUrl
+          url: mediaUrl,
+          metadata: optimized.metadata
         };
       }
 
       throw new Error(`Failed to upload image. Status: ${uploadResponse.status}`);
     } catch (error) {
+      logger.error('❌ WordPress image upload failed:', error);
       throw new WordPressError('Failed to upload image to WordPress', error);
     }
   }

@@ -128,3 +128,6 @@ backend/logs/
 backend/uploads/
 frontend/.env
 .cursor/ 
+
+# docs
+docs/

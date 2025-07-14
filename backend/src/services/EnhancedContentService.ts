@@ -35,6 +35,7 @@ export class EnhancedContentService {
         this.getImageLimit(request.imageSettings.maxImages),
         {
           ensureConsistency: request.imageSettings.ensureConsistency,
+          ensureAlbumConsistency: request.imageSettings.ensureAlbumConsistency,
           imageCategory: request.imageSettings.imageCategory
         }
       );
@@ -177,7 +178,7 @@ export class EnhancedContentService {
   }
 
   /**
-   * Select the best featured image based on criteria
+   * Select the best featured image based on criteria - ENHANCED with stricter landscape preference
    */
   private selectFeaturedImage(
     images: PhotoGalleryImage[], 
@@ -186,62 +187,176 @@ export class EnhancedContentService {
   ): PhotoGalleryImage {
     if (images.length === 0) {
       throw new Error("No images available to select featured image");
-  }
+    }
 
-    // Sort images by priority and type with AGGRESSIVE landscape preference for blog posts
+    logger.info(`🎯 Selecting featured image from ${images.length} candidates (preferPortrait: ${preferPortrait})`);
+
+    // ENHANCED: Sort images with ULTRA-AGGRESSIVE landscape preference for blog posts
     const sortedImages = [...images].sort((a, b) => {
       if (preferPortrait) {
         // For social media - prefer portrait
         if (a.featured_type === 'portrait' && b.featured_type !== 'portrait') return -1;
         if (a.featured_type !== 'portrait' && b.featured_type === 'portrait') return 1;
-        } else {
-        // For blog posts - AGGRESSIVELY prefer landscape (featured) images
-        // Check aspect ratio from metadata if available
+      } else {
+        // For blog posts - ULTRA-AGGRESSIVE landscape preference
         const aIsLandscape = this.isLandscapeImage(a);
         const bIsLandscape = this.isLandscapeImage(b);
-      
-        // Landscape images get highest priority
-        if (aIsLandscape && !bIsLandscape) return -1;
-        if (!aIsLandscape && bIsLandscape) return 1;
         
-        // Among landscape images, prefer 'featured' type
-        if (aIsLandscape && bIsLandscape) {
-          if (a.featured_type === 'featured' && b.featured_type !== 'featured') return -1;
-          if (a.featured_type !== 'featured' && b.featured_type === 'featured') return 1;
+        // Log detailed comparison for debugging
+        logger.info(`🔍 Comparing images:`, {
+          imageA: {
+            path: a.image_path,
+            type: a.featured_type,
+            isLandscape: aIsLandscape,
+            aspectRatio: a.metadata?.aspect_ratio || 'unknown',
+            priority: a.priority_order
+          },
+          imageB: {
+            path: b.image_path,
+            type: b.featured_type,
+            isLandscape: bIsLandscape,
+            aspectRatio: b.metadata?.aspect_ratio || 'unknown',
+            priority: b.priority_order
           }
+        });
+      
+        // HIGHEST PRIORITY: True landscape images (aspect_ratio > 1.0)
+        if (aIsLandscape && !bIsLandscape) {
+          logger.info(`✅ A wins: landscape vs non-landscape`);
+          return -1;
+        }
+        if (!aIsLandscape && bIsLandscape) {
+          logger.info(`✅ B wins: landscape vs non-landscape`);
+          return 1;
+        }
         
-        // If both are portrait or unknown, prefer 'featured' type
-        if (a.featured_type === 'featured' && b.featured_type !== 'featured') return -1;
-        if (a.featured_type !== 'featured' && b.featured_type === 'featured') return 1;
-  }
+        // Among landscape images, prefer higher aspect ratios (wider images)
+        if (aIsLandscape && bIsLandscape) {
+          const aRatio = a.metadata?.aspect_ratio || 1.0;
+          const bRatio = b.metadata?.aspect_ratio || 1.0;
+          
+          if (Math.abs(aRatio - bRatio) > 0.1) { // Significant difference
+            logger.info(`📏 Comparing aspect ratios: ${aRatio.toFixed(2)} vs ${bRatio.toFixed(2)}`);
+            return bRatio - aRatio; // Higher aspect ratio first
+          }
+          
+          // If similar aspect ratios, prefer 'featured' type
+          if (a.featured_type === 'featured' && b.featured_type !== 'featured') {
+            logger.info(`✅ A wins: featured type among landscapes`);
+            return -1;
+          }
+          if (a.featured_type !== 'featured' && b.featured_type === 'featured') {
+            logger.info(`✅ B wins: featured type among landscapes`);
+            return 1;
+          }
+        }
+        
+        // If both are portrait or unknown orientation, strongly prefer 'featured' type
+        if (!aIsLandscape && !bIsLandscape) {
+          if (a.featured_type === 'featured' && b.featured_type !== 'featured') {
+            logger.info(`✅ A wins: featured type among non-landscapes`);
+            return -1;
+          }
+          if (a.featured_type !== 'featured' && b.featured_type === 'featured') {
+            logger.info(`✅ B wins: featured type among non-landscapes`);
+            return 1;
+          }
+        }
+      }
 
-      // Finally sort by priority order
+      // Finally sort by priority order (lower number = higher priority)
       return a.priority_order - b.priority_order;
     });
 
     const selected = sortedImages[0];
     const isLandscape = this.isLandscapeImage(selected);
-    logger.info(`📷 Selected featured image: ${selected.image_path} (type: ${selected.featured_type}, priority: ${selected.priority_order}, landscape: ${isLandscape})`);
+    const aspectRatio = selected.metadata?.aspect_ratio || 'unknown';
+    
+    logger.info(`📷 SELECTED featured image:`, {
+      path: selected.image_path,
+      type: selected.featured_type,
+      isLandscape,
+      aspectRatio: typeof aspectRatio === 'number' ? aspectRatio.toFixed(2) : aspectRatio,
+      priority: selected.priority_order,
+      dimensions: selected.metadata ? `${selected.metadata.width}x${selected.metadata.height}` : 'unknown'
+    });
+    
+    // Validate selection for blog posts
+    if (!preferPortrait && !isLandscape) {
+      logger.warn(`⚠️ WARNING: Selected image is NOT landscape for blog post! This may affect thumbnail appearance.`);
+      
+      // Try to find ANY landscape image as backup
+      const landscapeBackup = sortedImages.find(img => this.isLandscapeImage(img));
+      if (landscapeBackup) {
+        logger.info(`🔄 SWITCHING to landscape backup:`, {
+          path: landscapeBackup.image_path,
+          type: landscapeBackup.featured_type,
+          aspectRatio: landscapeBackup.metadata?.aspect_ratio || 'unknown'
+        });
+        return landscapeBackup;
+      }
+    }
     
     return selected;
   }
 
   /**
-   * Determine if image is landscape based on metadata or type
+   * Determine if image is landscape based on metadata or type - ENHANCED detection
    */
   private isLandscapeImage(image: PhotoGalleryImage): boolean {
-    // Check metadata aspect ratio first
+    // PRIORITY 1: Check metadata aspect ratio first (most accurate)
     if (image.metadata?.aspect_ratio) {
-      return image.metadata.aspect_ratio > 1.0;
+      const isLandscape = image.metadata.aspect_ratio > 1.0;
+      logger.info(`🔍 Aspect ratio check: ${image.metadata.aspect_ratio.toFixed(2)} → ${isLandscape ? 'LANDSCAPE' : 'portrait'} (${image.image_path})`);
+      return isLandscape;
     }
     
-    // Check width vs height
+    // PRIORITY 2: Check width vs height from metadata
     if (image.metadata?.width && image.metadata?.height) {
-      return image.metadata.width > image.metadata.height;
-  }
+      const isLandscape = image.metadata.width > image.metadata.height;
+      const aspectRatio = (image.metadata.width / image.metadata.height).toFixed(2);
+      logger.info(`🔍 Dimension check: ${image.metadata.width}x${image.metadata.height} (${aspectRatio}) → ${isLandscape ? 'LANDSCAPE' : 'portrait'} (${image.image_path})`);
+      return isLandscape;
+    }
 
-    // Fallback: assume 'featured' type is landscape, 'portrait' is not
-    return image.featured_type === 'featured';
+    // PRIORITY 3: Check file path/name for orientation indicators
+    const imagePath = image.image_path?.toLowerCase() || '';
+    const folderPath = image.folder_path?.toLowerCase() || '';
+    const pathContent = `${imagePath} ${folderPath}`;
+    
+    // Strong landscape indicators
+    const landscapeKeywords = ['landscape', 'wide', 'horizontal', 'panorama', 'banner'];
+    const portraitKeywords = ['portrait', 'vertical', 'upright'];
+    
+    const hasLandscapeKeywords = landscapeKeywords.some(keyword => pathContent.includes(keyword));
+    const hasPortraitKeywords = portraitKeywords.some(keyword => pathContent.includes(keyword));
+    
+    if (hasLandscapeKeywords && !hasPortraitKeywords) {
+      logger.info(`🔍 Path keyword check: Found landscape keywords → LANDSCAPE (${image.image_path})`);
+      return true;
+    }
+    
+    if (hasPortraitKeywords && !hasLandscapeKeywords) {
+      logger.info(`🔍 Path keyword check: Found portrait keywords → portrait (${image.image_path})`);
+      return false;
+    }
+
+    // PRIORITY 4: Type-based fallback with enhanced logic
+    if (image.featured_type === 'featured') {
+      // 'featured' type is typically landscape for blog thumbnails
+      logger.info(`🔍 Type fallback: 'featured' type → LANDSCAPE (${image.image_path})`);
+      return true;
+    }
+    
+    if (image.featured_type === 'portrait') {
+      // 'portrait' type is explicitly portrait
+      logger.info(`🔍 Type fallback: 'portrait' type → portrait (${image.image_path})`);
+      return false;
+    }
+
+    // FINAL FALLBACK: Unknown orientation, assume landscape for blog posts
+    logger.warn(`⚠️ Unknown orientation, assuming LANDSCAPE for blog compatibility (${image.image_path})`);
+    return true;
   }
 
   // ... other helper functions can be removed if they are not used anymore ...

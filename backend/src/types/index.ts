@@ -117,6 +117,7 @@ export interface ContentMetadata {
     alt_text: string;
     caption?: string;
     wp_media_id?: number;
+    is_featured?: boolean;
   }>;
   [key: string]: any;
 }
@@ -170,6 +171,7 @@ export interface ImageSettings {
   specificFolder?: string;
   maxImages?: number | "auto";
   ensureConsistency?: boolean;
+  ensureAlbumConsistency?: boolean;
   selectedImages?: string[];
 }
 

@@ -85,6 +85,7 @@
     "puppeteer": "^24.10.2",
     "rate-limiter-flexible": "^4.0.1",
     "readability": "^0.1.0",
+    "sharp": "^0.34.3",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.3.2",

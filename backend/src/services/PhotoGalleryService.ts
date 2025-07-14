@@ -1,5 +1,6 @@
 import axios from "axios";
 import { logger } from "../utils/logger";
+import { ImageUsageTrackingService } from "./ImageUsageTrackingService";
 
 export interface PhotoGalleryImage {
   id: number;
@@ -54,6 +55,7 @@ export interface PhotoGalleryConfig {
 export class PhotoGalleryService {
   private readonly config: PhotoGalleryConfig;
   private readonly axios: any;
+  private readonly usageTracker: ImageUsageTrackingService;
 
   constructor(config?: PhotoGalleryConfig) {
     this.config = config || {
@@ -68,6 +70,8 @@ export class PhotoGalleryService {
         "Accept": "application/json",
       },
     });
+    
+    this.usageTracker = new ImageUsageTrackingService();
   }
 
   /**
@@ -272,6 +276,7 @@ export class PhotoGalleryService {
     limit: number = 5,
     options: {
       ensureConsistency?: boolean;
+      ensureAlbumConsistency?: boolean;
       imageCategory?: string;
     } = {}
   ): Promise<PhotoGalleryImage[]> {
@@ -296,13 +301,48 @@ export class PhotoGalleryService {
 
       // Get more images than needed to have variety
       const fetchLimit = Math.max(limit * 3, 20);
-      const result = await this.getFeaturedImages({
-        category: categorySlug || undefined,
-        type: contentType === "social" ? "portrait" : "featured",
-        limit: fetchLimit,
-        priority: "desc",
-        metadata: true,
-      });
+      
+      // ENHANCED: For blog posts, try to get both featured AND portrait images for better selection
+      let result;
+      if (contentType === "blog") {
+        // For blog posts, get BOTH types and let the selection logic pick the best landscape
+        logger.info(`🎯 Getting MIXED image types for better landscape selection (category: ${categorySlug || "all"})`);
+        
+        const featuredResult = await this.getFeaturedImages({
+          category: categorySlug || undefined,
+          type: "featured",
+          limit: Math.ceil(fetchLimit * 0.7), // 70% featured
+          priority: "desc",
+          metadata: true,
+        });
+        
+        const portraitResult = await this.getFeaturedImages({
+          category: categorySlug || undefined,
+          type: "portrait", 
+          limit: Math.ceil(fetchLimit * 0.3), // 30% portrait (for variety)
+          priority: "desc",
+          metadata: true,
+        });
+        
+        // Combine both types
+        result = {
+          images: [...featuredResult.images, ...portraitResult.images],
+          total_found: featuredResult.total_found + portraitResult.total_found,
+          available_categories: featuredResult.available_categories
+        };
+        
+        logger.info(`📊 Mixed image types: ${featuredResult.images.length} featured + ${portraitResult.images.length} portrait = ${result.images.length} total`);
+        
+      } else {
+        // For social media, stick to portrait preference
+        result = await this.getFeaturedImages({
+          category: categorySlug || undefined,
+          type: "portrait",
+          limit: fetchLimit,
+          priority: "desc",
+          metadata: true,
+        });
+      }
 
       logger.info(`Found ${result.images.length} images for topic "${topic}" (category: ${categorySlug || "all"})`);
       
@@ -334,11 +374,11 @@ export class PhotoGalleryService {
       }
       }
 
-      // Apply randomization and consistency logic
+      // ENHANCED: Apply SMART album mixing by default for better variety
       let selectedImages = result.images;
       
-      if (options.ensureConsistency && selectedImages.length > 0) {
-        // Group images by folder
+      if (selectedImages.length > 0) {
+        // Group images by folder to understand distribution
         const imagesByFolder = selectedImages.reduce((acc, img) => {
           const folder = img.folder_path || "unknown";
           if (!acc[folder]) acc[folder] = [];
@@ -346,29 +386,92 @@ export class PhotoGalleryService {
           return acc;
         }, {} as Record<string, PhotoGalleryImage[]>);
 
-        // Find folders with enough images
-        const eligibleFolders = Object.entries(imagesByFolder)
-          .filter(([_, imgs]) => imgs.length >= limit);
+        const folders = Object.entries(imagesByFolder);
+        
+        if (options.ensureAlbumConsistency && folders.length > 1) {
+          // User explicitly wants same album consistency
+                     const eligibleFolders = folders.filter(([_, imgs]) => (imgs as PhotoGalleryImage[]).length >= limit);
 
-        if (eligibleFolders.length > 0) {
-          // Randomly select a folder
-          const randomFolderIndex = Math.floor(Math.random() * eligibleFolders.length);
-          const selectedFolder = eligibleFolders[randomFolderIndex];
-          selectedImages = selectedFolder[1];
+          if (eligibleFolders.length > 0) {
+            // Randomly select a folder
+            const randomFolderIndex = Math.floor(Math.random() * eligibleFolders.length);
+            const selectedFolder = eligibleFolders[randomFolderIndex];
+            selectedImages = selectedFolder[1];
+            
+            logger.info(`📁 SAME ALBUM: Selected folder "${selectedFolder[0]}" with ${selectedImages.length} images (from ${eligibleFolders.length} eligible folders)`);
+          } else {
+            logger.info(`📁 No single folder has ${limit} images, falling back to mixed albums`);
+          }
+        } else if (folders.length > 1) {
+          // DEFAULT: Smart mixing across albums for variety (when ensureAlbumConsistency = false)
+          logger.info(`🎲 SMART MIXING: Distributing ${limit} images across ${folders.length} available albums for variety`);
           
-          logger.info(`📁 Selected folder "${selectedFolder[0]}" with ${selectedImages.length} images (from ${eligibleFolders.length} eligible folders)`);
+          const mixedImages: PhotoGalleryImage[] = [];
+          let folderIndex = 0;
+
+          // Distribute images evenly across folders
+          while (mixedImages.length < limit && mixedImages.length < selectedImages.length) {
+            const currentFolder = folders[folderIndex % folders.length];
+            const folderImages = currentFolder[1] as PhotoGalleryImage[];
+
+            // Find unused image in this folder
+            const unusedImage = folderImages.find(img => !mixedImages.includes(img));
+            if (unusedImage) {
+              mixedImages.push(unusedImage);
+            }
+            folderIndex++;
+            
+            // Safety check to prevent infinite loop
+            if (folderIndex > folders.length * 10) break;
+          }
+
+          selectedImages = mixedImages;
+
+          // Log the distribution
+          const distribution = mixedImages.reduce((acc, img) => {
+            const folder = img.folder_path || "unknown";
+            acc[folder] = (acc[folder] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>);
+
+          logger.info(`📊 Smart mixing distribution: ${JSON.stringify(distribution)}`);
         } else {
-          logger.info(`📁 No single folder has ${limit} images, using mixed folders`);
+          logger.info(`📁 Only one album available: ${folders[0]?.[0] || 'unknown'} (${selectedImages.length} images)`);
         }
       }
 
-      // Shuffle the selected images for randomness
-      const shuffled = this.shuffleArray([...selectedImages]);
+      // ENHANCED: Filter out recently used images to avoid duplicates
+      const unusedImages = this.usageTracker.filterUnusedImages(
+        selectedImages, 
+        categorySlug || 'general',
+        Math.min(limit, 3) // Ensure at least 3 images for variety
+      ) as PhotoGalleryImage[];
+      
+      logger.info(`🚫 Duplicate filtering: ${selectedImages.length} → ${unusedImages.length} unused images`);
+      
+      // Shuffle the unused images for randomness
+      const shuffled = this.shuffleArray([...unusedImages]);
       
       // Return only the requested number of images
       const finalImages = shuffled.slice(0, limit);
       
-      logger.info(`🎲 Returning ${finalImages.length} randomly selected images`);
+      // Mark selected images as used to prevent future duplicates
+      this.usageTracker.markImagesAsUsed(
+        finalImages, 
+        topic, 
+        categorySlug || 'general'
+      );
+      
+      logger.info(`✅ Final selection: ${finalImages.length} unique images (topic: "${topic}")`);
+      
+      // Log usage stats for debugging
+      const stats = this.usageTracker.getUsageStats();
+      logger.info(`📊 Usage tracking stats:`, {
+        totalTracked: stats.totalTracked,
+        recentlyUsed: stats.recentlyUsed,
+        categories: stats.categoriesUsed.join(', ')
+      });
+      
       return finalImages;
 
     } catch (error) {
@@ -797,5 +900,26 @@ export class PhotoGalleryService {
     };
     
     return mockFolders[categorySlug] || [`${categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1)} Collection`];
+  }
+
+  /**
+   * Clear image usage history (for development/testing)
+   */
+  clearUsageHistory(): void {
+    this.usageTracker.clearUsageHistory();
+  }
+
+  /**
+   * Get usage statistics for debugging
+   */
+  getUsageStats() {
+    return this.usageTracker.getUsageStats();
+  }
+
+  /**
+   * Get recently used images for debugging
+   */
+  getRecentlyUsedImages(category: string = 'general', limit: number = 10) {
+    return this.usageTracker.getRecentlyUsedImages(category, limit);
   }
 } 
