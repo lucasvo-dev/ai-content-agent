@@ -309,7 +309,7 @@ export class PhotoGalleryService {
         logger.info(`🎯 Getting MIXED image types for better landscape selection (category: ${categorySlug || "all"})`);
         
         const featuredResult = await this.getFeaturedImages({
-          category: categorySlug || undefined,
+        category: categorySlug || undefined,
           type: "featured",
           limit: Math.ceil(fetchLimit * 0.7), // 70% featured
           priority: "desc",
@@ -338,10 +338,10 @@ export class PhotoGalleryService {
         result = await this.getFeaturedImages({
           category: categorySlug || undefined,
           type: "portrait",
-          limit: fetchLimit,
-          priority: "desc",
-          metadata: true,
-        });
+        limit: fetchLimit,
+        priority: "desc",
+        metadata: true,
+      });
       }
 
       logger.info(`Found ${result.images.length} images for topic "${topic}" (category: ${categorySlug || "all"})`);
@@ -392,14 +392,14 @@ export class PhotoGalleryService {
           // User explicitly wants same album consistency
                      const eligibleFolders = folders.filter(([_, imgs]) => (imgs as PhotoGalleryImage[]).length >= limit);
 
-          if (eligibleFolders.length > 0) {
-            // Randomly select a folder
-            const randomFolderIndex = Math.floor(Math.random() * eligibleFolders.length);
-            const selectedFolder = eligibleFolders[randomFolderIndex];
-            selectedImages = selectedFolder[1];
-            
+        if (eligibleFolders.length > 0) {
+          // Randomly select a folder
+          const randomFolderIndex = Math.floor(Math.random() * eligibleFolders.length);
+          const selectedFolder = eligibleFolders[randomFolderIndex];
+          selectedImages = selectedFolder[1];
+          
             logger.info(`📁 SAME ALBUM: Selected folder "${selectedFolder[0]}" with ${selectedImages.length} images (from ${eligibleFolders.length} eligible folders)`);
-          } else {
+        } else {
             logger.info(`📁 No single folder has ${limit} images, falling back to mixed albums`);
           }
         } else if (folders.length > 1) {

@@ -187,7 +187,7 @@ export class EnhancedContentService {
   ): PhotoGalleryImage {
     if (images.length === 0) {
       throw new Error("No images available to select featured image");
-    }
+  }
 
     logger.info(`🎯 Selecting featured image from ${images.length} candidates (preferPortrait: ${preferPortrait})`);
 
@@ -197,11 +197,11 @@ export class EnhancedContentService {
         // For social media - prefer portrait
         if (a.featured_type === 'portrait' && b.featured_type !== 'portrait') return -1;
         if (a.featured_type !== 'portrait' && b.featured_type === 'portrait') return 1;
-      } else {
+        } else {
         // For blog posts - ULTRA-AGGRESSIVE landscape preference
         const aIsLandscape = this.isLandscapeImage(a);
         const bIsLandscape = this.isLandscapeImage(b);
-        
+      
         // Log detailed comparison for debugging
         logger.info(`🔍 Comparing images:`, {
           imageA: {
@@ -249,7 +249,7 @@ export class EnhancedContentService {
             logger.info(`✅ B wins: featured type among landscapes`);
             return 1;
           }
-        }
+          }
         
         // If both are portrait or unknown orientation, strongly prefer 'featured' type
         if (!aIsLandscape && !bIsLandscape) {
@@ -262,7 +262,7 @@ export class EnhancedContentService {
             return 1;
           }
         }
-      }
+  }
 
       // Finally sort by priority order (lower number = higher priority)
       return a.priority_order - b.priority_order;
